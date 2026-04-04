@@ -15,7 +15,7 @@ state_dict = torch.load(model_path, map_location="cpu")
 model.load_state_dict(state_dict)
 model.eval()
 
-model_input = tokenizer(words=prompt.split())
+model_input = tokenizer(words=prompt)
 input_length = model_input.size(dim=0)
 
 with torch.no_grad():
@@ -24,7 +24,7 @@ with torch.no_grad():
     predicted_ids = predicted_id
 
     for i in range(input_length, max_len):
-        if predicted_id.item() == tokenizer(["<EOS>"]).item():
+        if predicted_id.item() == tokenizer("<EOS>").item():
             break
         
         model_input = torch.cat((model_input, predicted_id))
