@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import Adam
 import lightning as L
 
 from position_encoding import PositionEncoding
@@ -40,4 +41,12 @@ class DecoderOnlyTransformer(L.LightningModule):
         
         return fc_layer_output
         
+    def configure_optimizers(self):
+        return Adam(self.parameters(), lr=0.1)
+    
+    def training_step(self, batch, batch_idx):
+        input_tokens, labels = batch
+        output = self.forward(input_tokens[0])
+        loss = self.loss(output, labels[0])
         
+        return loss
