@@ -5,7 +5,7 @@ from transformer import DecoderOnlyTransformer
 from tokenizer import tokenizer, vocabulary, detokenizer
 
 
-prompt = "what is statquest <EOS> awesome"
+prompt = "what is statquest <EOS>"
 max_len = 6
 
 model = DecoderOnlyTransformer(num_tokens=len(vocabulary), d_model=2, max_len=max_len)
