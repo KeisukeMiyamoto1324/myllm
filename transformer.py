@@ -15,7 +15,7 @@ class DecoderOnlyTransformer(L.LightningModule):
     def __init__(self, num_tokens=4, d_model=2, max_len=6):
         super().__init__()
         
-        self.we = nn.EmbeddingBag(num_embeddings=num_tokens, embedding_dim=d_model)
+        self.we = nn.Embedding(num_embeddings=num_tokens, embedding_dim=d_model)
         self.pe = PositionEncoding(d_model=d_model, max_len=max_len)
         
         self.self_attention = Attention(d_model=d_model)
