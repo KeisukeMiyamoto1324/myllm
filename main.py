@@ -57,3 +57,7 @@ labels = torch.tensor(
         ],
     ]
 )
+
+dataset = TensorDataset(input, labels)
+dataloader = DataLoader(dataset)
+
