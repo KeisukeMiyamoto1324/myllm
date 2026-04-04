@@ -8,14 +8,14 @@ def get_dataset(
     tokenizer: Callable[[list[str], dict[str, int]], torch.Tensor]
 ) -> TensorDataset:
     inputs = torch.stack([
-        tokenizer(sentence.split()) 
+        tokenizer(sentence) 
         for sentence in sentences
     ])
 
     labels = torch.stack([
         torch.cat([
-            tokenizer(sentence.split()[1:]),
-            tokenizer(["<EOS>"])
+            tokenizer(sentence)[1:],
+            tokenizer("<EOS>")
         ])
         for sentence in sentences
     ])
