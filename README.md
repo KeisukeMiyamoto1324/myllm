@@ -7,6 +7,19 @@ This repository includes a small from-scratch implementation for training and in
 Most of the code in this repository is based on the StatQuest YouTube video "Coding a Decoder-Only Transformer from Scratch in PyTorch":
 https://www.youtube.com/watch?v=C9QSpl5nmrY
 
+## Setup
+
+```bash
+pip install -r requirements.txt
+```
+
+## Run
+
+```bash
+python train.py
+python inference.py
+```
+
 ## Files
 
 - `train.py`: trains the model and saves weights to `model/model.pth`
