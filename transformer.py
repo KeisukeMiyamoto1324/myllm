@@ -7,6 +7,7 @@ import lightning as L
 from position_encoding import PositionEncoding
 from self_attention import Attention
 
+
 class DecoderOnlyTransformer(L.LightningModule):
     # num_token: how many tokens are in the vocabulary
     # the number of values we want to represent each token
