@@ -27,7 +27,9 @@ class DecoderOnlyTransformer(L.LightningModule):
         word_embeddings = self.we(token_ids)
         position_encoded = self.pe(word_embeddings)
         
-        mask = torch.tril(torch.ones((token_ids.size(dim=0), token_ids.size(dim=0))))
+        mask = torch.tril(
+            torch.ones((token_ids.size(dim=0), token_ids.size(dim=0)), device=token_ids.device)
+        )
         mask = mask == 0
         
         self_attention_value = self.self_attention(

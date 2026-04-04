@@ -20,7 +20,7 @@ class Attention(nn.Module):
         v: torch.Tensor = self.W_v(encoding_for_v)
         
         sims = torch.matmul(q, k.transpose(dim0=self.row_dim, dim1=self.col_dim))
-        scaled_sims = sims / torch.tensor(k.size(self.col_dim)**0.5)
+        scaled_sims = sims / (k.size(self.col_dim) ** 0.5)
         
         if mask is not None:
             scaled_sims = scaled_sims.masked_fill(mask=mask, value=-1e9)

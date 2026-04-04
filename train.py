@@ -1,3 +1,4 @@
+import torch
 from torch.utils.data import DataLoader
 import lightning as L
 
@@ -20,3 +21,4 @@ model = DecoderOnlyTransformer(num_tokens=len(vocabulary), d_model=2, max_len=ma
 trainer = L.Trainer(max_epochs=30)
 trainer.fit(model, train_dataloaders=dataloader)
 
+torch.save(model.state_dict(), "model/model.pth")
