@@ -1,64 +1,16 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from torch.optim import Adam
-from torch.utils.data import TensorDataset, DataLoader
-
-import lightning as L
+from tokenizer import get_token_map, tokenizer
+from dataset import get_dataset
+from torch.utils.data import DataLoader
 
 
-token_to_id = {
-    "what": 0,
-    "is": 1,
-    "statquest": 2,
-    "awesome": 3,
-    "<EOS>": 4
-}
-# {0: 'what', 1: 'is', 2: 'statquest', 3: 'awesome', 4: '<EOS>'}
-id_to_token = dict(map(reversed, token_to_id.items()))  
+words = ["what", "is", "statquest", "awesome", "<EOS>"]
+token_map = get_token_map(words=words)
 
-# tensor([[0, 1, 2, 4, 3],
-#         [2, 1, 0, 4, 3]])
-inputs = torch.tensor(
-    [
-        [
-            token_to_id["what"],
-            token_to_id["is"],
-            token_to_id["statquest"],
-            token_to_id["<EOS>"],
-            token_to_id["awesome"],
-        ],
-        [
-            token_to_id["statquest"],
-            token_to_id["is"],
-            token_to_id["what"],
-            token_to_id["<EOS>"],
-            token_to_id["awesome"],
-        ],
-    ]
-)
+sentences = [
+    "what is statquest <EOS> awesome",
+    "statquest is what <EOS> awesome",
+]
 
-labels = torch.tensor(
-    [
-        [
-            token_to_id["is"],
-            token_to_id["statquest"],
-            token_to_id["<EOS>"],
-            token_to_id["awesome"],
-            token_to_id["<EOS>"]
-        ],
-        [
-            token_to_id["is"],
-            token_to_id["what"],
-            token_to_id["<EOS>"],
-            token_to_id["awesome"],
-            token_to_id["<EOS>"]
-        ],
-    ]
-)
-
-dataset = TensorDataset(input, labels)
+dataset = get_dataset(sentences=sentences, token_map=token_map, tokenizer=tokenizer)
 dataloader = DataLoader(dataset)
-
 
