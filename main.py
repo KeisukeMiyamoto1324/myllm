@@ -39,3 +39,21 @@ inputs = torch.tensor(
     ]
 )
 
+labels = torch.tensor(
+    [
+        [
+            token_to_id["is"],
+            token_to_id["statquest"],
+            token_to_id["<EOS>"],
+            token_to_id["awesome"],
+            token_to_id["<EOS>"]
+        ],
+        [
+            token_to_id["is"],
+            token_to_id["what"],
+            token_to_id["<EOS>"],
+            token_to_id["awesome"],
+            token_to_id["<EOS>"]
+        ],
+    ]
+)
