@@ -9,7 +9,7 @@ from dataset import get_dataset
 
 sentences = [
     "what is statquest <EOS> awesome",
-    "statquest is what <EOS> awesome",
+    "statquest is what <EOS> dumm",
 ]
 max_len = 6
 
