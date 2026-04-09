@@ -75,6 +75,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         num_heads: int = 1,
         d_ff: int = 8,
         learning_rate: float = 0.1,
+        pad_token_id: int = 0,
     ) -> None:
         super().__init__()
 
@@ -90,12 +91,13 @@ class DecoderOnlyTransformer(L.LightningModule):
         self.final_norm = nn.LayerNorm(normalized_shape=d_model)
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)
         self.learning_rate = learning_rate
+        self.pad_token_id = pad_token_id
 
         # ---------------------------------------------------------
         # Keep the loss local to the model so Lightning can call the
         # training step without extra setup.
         # ---------------------------------------------------------
-        self.loss = nn.CrossEntropyLoss()
+        self.loss = nn.CrossEntropyLoss(ignore_index=pad_token_id)
 
     def _create_causal_mask(self, token_ids: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------

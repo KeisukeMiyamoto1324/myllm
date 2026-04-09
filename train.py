@@ -25,19 +25,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--max-epochs", type=int, default=200)
+    parser.add_argument("--train-data", type=str, default="dataset/train.jsonl")
     return parser.parse_args()
 
 
 def main() -> None:
     # ---------------------------------------------------------
-    # Parse CLI arguments and prepare the fixed training corpus
-    # used in this minimal learning example.
+    # Parse CLI arguments and load training sentences from the
+    # configured jsonl file.
     # ---------------------------------------------------------
     args = parse_args()
-    sentences = [
-        "what is statquest <EOS> awesome",
-        "statquest is what <EOS> great",
-    ]
+    train_data_path = Path(args.train_data)
+
+    with open(train_data_path) as f:
+        raw_sentences = [json.loads(line)["text"] for line in f]
+
+    # ---------------------------------------------------------
+    # Append EOS and PAD tokens so every sentence fits the fixed
+    # sequence length expected by the model.
+    # ---------------------------------------------------------
+    sentences = []
+
+    for sentence in raw_sentences:
+        tokens = sentence.split()[: args.max_len - 1]
+        padded_tokens = tokens + ["<EOS>"]
+        padding_size = args.max_len - len(padded_tokens)
+        sentences.append(" ".join(padded_tokens + ["<PAD>"] * padding_size))
 
     # ---------------------------------------------------------
     # Create the output directory and tokenizer before building
@@ -48,8 +61,13 @@ def main() -> None:
 
     tokenizer = Tokenizer()
     tokenizer.learn_vocab(sentences)
+    pad_token_id = tokenizer.tokenizer("<PAD>").item()
 
-    dataset = get_dataset(sentences=sentences, tokenizer=tokenizer.tokenizer)
+    dataset = get_dataset(
+        sentences=sentences,
+        tokenizer=tokenizer.tokenizer,
+        pad_token_id=pad_token_id,
+    )
     dataloader = DataLoader(dataset, batch_size=args.batch_size)
 
     # ---------------------------------------------------------
@@ -64,6 +82,7 @@ def main() -> None:
         num_heads=args.num_heads,
         d_ff=args.d_ff,
         learning_rate=args.learning_rate,
+        pad_token_id=pad_token_id,
     )
 
     trainer = L.Trainer(max_epochs=args.max_epochs)
@@ -85,6 +104,7 @@ def main() -> None:
                 "num_heads": args.num_heads,
                 "d_ff": args.d_ff,
                 "learning_rate": args.learning_rate,
+                "pad_token_id": pad_token_id,
             },
             f,
         )
