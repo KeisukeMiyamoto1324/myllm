@@ -16,13 +16,15 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
-python train.py
+python train_tokenizer.py
+python train_model.py
 python inference.py
 ```
 
 ## Files
 
-- `train.py`: trains the model and saves weights to `model/model.pth`
+- `train_tokenizer.py`: trains the tokenizer and saves it to `model/tokenizer.json`
+- `train_model.py`: trains the model and saves weights to `model/model.pth`
 - `inference.py`: loads the saved model and runs token generation
 - `transformer.py`, `self_attention.py`, `position_encoding.py`: core model components
 - `tokenizer.py`, `dataset.py`: tokenization and dataset utilities
