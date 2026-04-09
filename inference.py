@@ -8,7 +8,7 @@ from transformer import DecoderOnlyTransformer
 
 
 # prompt = "what is statquest <EOS>"
-prompt = "statquest is what <EOS>"
+prompt = "the book"
 
 model_dir = Path(__file__).with_name("model")
 model_path = model_dir / "model.pth"
