@@ -87,4 +87,4 @@ Forward 処理では、まず入力 Token を Embedding ベクトルに変換し
         return loss
 ```
 
-通常であれば Epoch を回すループを書き、Gradient を初期化し、Loss を計算して Backpropagation を行うという一連の処理をすべて手作業で記述する必要があります。しかし、PyTorch Lightning を利用することでこれらの定型的な処理をフレームワーク側に任せることができます。実際の学習の実行は `train.py` ファイルにて Trainer の fit メソッドを呼び出すだけで完結するため、モデルのアーキテクチャ自体の理解や実験に集中することができます。
+通常であれば Epoch を回すループを書き、Gradient を初期化し、Loss を計算して Backpropagation を行うという一連の処理をすべて手作業で記述する必要があります。しかし、PyTorch Lightning を利用することでこれらの定型的な処理をフレームワーク側に任せることができます。実際のモデル学習の実行は `train_model.py` ファイルにて Trainer の fit メソッドを呼び出すだけで完結し、Tokenizer の学習は `train_tokenizer.py` に分離されているため、モデルのアーキテクチャ自体の理解や実験に集中することができます。

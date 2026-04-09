@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset import get_dataset
+from text_preprocessor import format_sentences, load_sentences
 from tokenizer import Tokenizer
 from transformer import DecoderOnlyTransformer
 
@@ -26,41 +27,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--max-epochs", type=int, default=200)
     parser.add_argument("--train-data", type=str, default="dataset/train.jsonl")
+    parser.add_argument("--tokenizer-path", type=str, default="model/tokenizer.json")
     return parser.parse_args()
 
 
 def main() -> None:
     # ---------------------------------------------------------
-    # Parse CLI arguments and load training sentences from the
-    # configured jsonl file.
+    # Parse CLI arguments and resolve the training data and
+    # tokenizer artifact paths.
     # ---------------------------------------------------------
     args = parse_args()
     train_data_path = Path(args.train_data)
-
-    with open(train_data_path) as f:
-        raw_sentences = [json.loads(line)["text"] for line in f]
+    tokenizer_path = Path(args.tokenizer_path)
 
     # ---------------------------------------------------------
-    # Append EOS and PAD tokens so every sentence fits the fixed
-    # sequence length expected by the model.
+    # Load the raw training text and apply the shared sentence
+    # formatting rule before dataset construction.
     # ---------------------------------------------------------
-    sentences = []
-
-    for sentence in raw_sentences:
-        tokens = sentence.split()[: args.max_len - 1]
-        padded_tokens = tokens + ["<EOS>"]
-        padding_size = args.max_len - len(padded_tokens)
-        sentences.append(" ".join(padded_tokens + ["<PAD>"] * padding_size))
+    raw_sentences = load_sentences(path=train_data_path)
+    sentences = format_sentences(raw_sentences=raw_sentences, max_len=args.max_len)
 
     # ---------------------------------------------------------
-    # Create the output directory and tokenizer before building
-    # the dataset and data loader.
+    # Create the output directory and load the saved tokenizer
+    # before building the dataset and data loader.
     # ---------------------------------------------------------
     model_dir = Path(__file__).with_name("model")
     model_dir.mkdir(exist_ok=True)
 
-    tokenizer = Tokenizer()
-    tokenizer.learn_vocab(sentences)
+    tokenizer = Tokenizer.load(tokenizer_path)
     pad_token_id = tokenizer.tokenizer("<PAD>").item()
 
     dataset = get_dataset(
@@ -89,11 +83,10 @@ def main() -> None:
     trainer.fit(model, train_dataloaders=dataloader)
 
     # ---------------------------------------------------------
-    # Save the trained model weights and tokenizer artifacts for
-    # later inference.
+    # Save the trained model weights and configuration for later
+    # inference with the existing tokenizer artifact.
     # ---------------------------------------------------------
     torch.save(model.state_dict(), model_dir / "model.pth")
-    tokenizer.save(model_dir / "tokenizer.json")
 
     with open(model_dir / "model_config.json", "w") as f:
         json.dump(
