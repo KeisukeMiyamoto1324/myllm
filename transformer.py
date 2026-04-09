@@ -26,11 +26,12 @@ class DecoderOnlyTransformer(L.LightningModule):
     def forward(self, token_ids: torch.Tensor):
         word_embeddings = self.we(token_ids)
         position_encoded = self.pe(word_embeddings)
+        seq_len = token_ids.size(dim=1)
         
         mask = torch.tril(
-            torch.ones((token_ids.size(dim=0), token_ids.size(dim=0)), device=token_ids.device)
+            torch.ones((seq_len, seq_len), device=token_ids.device)
         )
-        mask = mask == 0
+        mask = (mask == 0).unsqueeze(0)
         
         self_attention_value = self.self_attention(
             position_encoded,
@@ -49,7 +50,7 @@ class DecoderOnlyTransformer(L.LightningModule):
     
     def training_step(self, batch, batch_idx):
         input_tokens, labels = batch
-        output = self.forward(input_tokens[0])
-        loss = self.loss(output, labels[0])
+        output = self.forward(input_tokens)
+        loss = self.loss(output.transpose(1, 2), labels)
         
         return loss

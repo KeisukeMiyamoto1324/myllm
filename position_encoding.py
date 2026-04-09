@@ -22,7 +22,8 @@ class PositionEncoding(nn.Module):
         self.register_buffer('pe', pe)
         
     def forward(self, word_embeddings: torch.Tensor):
-        return word_embeddings + self.pe[:word_embeddings.size(0), :]
+        seq_len = word_embeddings.size(1)
+        return word_embeddings + self.pe[:seq_len, :].unsqueeze(0)
         
         
 if __name__ == "__main__":
