@@ -111,7 +111,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # ---------------------------------------------------------
-    # Provide a single script entry point for command line usage.
-    # ---------------------------------------------------------
     main()
