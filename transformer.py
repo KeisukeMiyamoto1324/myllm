@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.optim import Adam
 import lightning as L
 
@@ -8,49 +7,139 @@ from position_encoding import PositionEncoding
 from self_attention import Attention
 
 
-class DecoderOnlyTransformer(L.LightningModule):
-    # num_token: how many tokens are in the vocabulary
-    # the number of values we want to represent each token
-    
-    def __init__(self, num_tokens=4, d_model=2, max_len=6):
+class FeedForward(nn.Module):
+    def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
-        
+
+        # ---------------------------------------------------------
+        # Use the standard Transformer feed-forward sublayer so each
+        # token can be transformed independently after attention.
+        # ---------------------------------------------------------
+        self.linear_1 = nn.Linear(in_features=d_model, out_features=d_ff)
+        self.activation = nn.GELU()
+        self.linear_2 = nn.Linear(in_features=d_ff, out_features=d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Expand the channel dimension, apply a non-linearity, and
+        # project back to the model dimension.
+        # ---------------------------------------------------------
+        hidden = self.linear_1(x)
+        activated = self.activation(hidden)
+        return self.linear_2(activated)
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int) -> None:
+        super().__init__()
+
+        # ---------------------------------------------------------
+        # Compose one decoder block from attention, feed-forward, and
+        # normalization layers with residual connections.
+        # ---------------------------------------------------------
+        self.norm_1 = nn.LayerNorm(normalized_shape=d_model)
+        self.attention = Attention(d_model=d_model, num_heads=num_heads)
+        self.norm_2 = nn.LayerNorm(normalized_shape=d_model)
+        self.feed_forward = FeedForward(d_model=d_model, d_ff=d_ff)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Apply pre-norm self-attention so multiple decoder blocks can
+        # be stacked without changing the external interface.
+        # ---------------------------------------------------------
+        attention_input = self.norm_1(x)
+        attention_output = self.attention(
+            attention_input,
+            attention_input,
+            attention_input,
+            mask,
+        )
+        attention_residual = x + attention_output
+
+        # ---------------------------------------------------------
+        # Apply the position-wise feed-forward network as the second
+        # sublayer inside the decoder block.
+        # ---------------------------------------------------------
+        feed_forward_input = self.norm_2(attention_residual)
+        feed_forward_output = self.feed_forward(feed_forward_input)
+        return attention_residual + feed_forward_output
+
+
+class DecoderOnlyTransformer(L.LightningModule):
+    def __init__(
+        self,
+        num_tokens: int = 4,
+        d_model: int = 2,
+        max_len: int = 6,
+        num_layers: int = 2,
+        num_heads: int = 1,
+        d_ff: int = 8,
+    ) -> None:
+        super().__init__()
+
+        # ---------------------------------------------------------
+        # Embed tokens and positions before passing them through a
+        # stack of decoder blocks.
+        # ---------------------------------------------------------
         self.we = nn.Embedding(num_embeddings=num_tokens, embedding_dim=d_model)
         self.pe = PositionEncoding(d_model=d_model, max_len=max_len)
-        
-        self.self_attention = Attention(d_model=d_model)
+        self.blocks = nn.ModuleList(
+            [DecoderBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff) for _ in range(num_layers)]
+        )
+        self.final_norm = nn.LayerNorm(normalized_shape=d_model)
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)
-        
+
+        # ---------------------------------------------------------
+        # Keep the loss local to the model so Lightning can call the
+        # training step without extra setup.
+        # ---------------------------------------------------------
         self.loss = nn.CrossEntropyLoss()
-        
-    def forward(self, token_ids: torch.Tensor):
-        word_embeddings = self.we(token_ids)
-        position_encoded = self.pe(word_embeddings)
+
+    def _create_causal_mask(self, token_ids: torch.Tensor) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Build a mask that hides future tokens for autoregressive
+        # decoding in every decoder block.
+        # ---------------------------------------------------------
         seq_len = token_ids.size(dim=1)
-        
-        mask = torch.tril(
-            torch.ones((seq_len, seq_len), device=token_ids.device)
-        )
-        mask = (mask == 0).unsqueeze(0)
-        
-        self_attention_value = self.self_attention(
-            position_encoded,
-            position_encoded,
-            position_encoded,
-            mask
-        )
-        
-        residual_connection_values = position_encoded + self_attention_value
-        fc_layer_output = self.fc_layer(residual_connection_values)
-        
-        return fc_layer_output
-        
-    def configure_optimizers(self):
+        lower_triangular = torch.tril(torch.ones((seq_len, seq_len), device=token_ids.device, dtype=torch.bool))
+        return (~lower_triangular).unsqueeze(0).unsqueeze(0)
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Convert token ids into hidden states and apply positional
+        # information before the decoder stack.
+        # ---------------------------------------------------------
+        word_embeddings = self.we(token_ids)
+        hidden_states = self.pe(word_embeddings)
+        mask = self._create_causal_mask(token_ids)
+
+        # ---------------------------------------------------------
+        # Reuse the same decoder block interface for every layer to
+        # make the model depth configurable.
+        # ---------------------------------------------------------
+        for block in self.blocks:
+            hidden_states = block(hidden_states, mask)
+
+        # ---------------------------------------------------------
+        # Normalize the final hidden states and map them into token
+        # logits for next-token prediction.
+        # ---------------------------------------------------------
+        normalized_hidden_states = self.final_norm(hidden_states)
+        return self.fc_layer(normalized_hidden_states)
+
+    def configure_optimizers(self) -> Adam:
+        # ---------------------------------------------------------
+        # Use the same optimizer setup as before while keeping the
+        # deeper architecture trainable with one entry point.
+        # ---------------------------------------------------------
         return Adam(self.parameters(), lr=0.1)
-    
-    def training_step(self, batch, batch_idx):
+
+    def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Run the forward pass and compute token-level cross-entropy
+        # against the shifted labels.
+        # ---------------------------------------------------------
+        del batch_idx
         input_tokens, labels = batch
         output = self.forward(input_tokens)
-        loss = self.loss(output.transpose(1, 2), labels)
-        
-        return loss
+        return self.loss(output.transpose(1, 2), labels)
