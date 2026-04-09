@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 import lightning as L
@@ -74,6 +75,19 @@ def main() -> None:
     # ---------------------------------------------------------
     torch.save(model.state_dict(), model_dir / "model.pth")
     tokenizer.save(model_dir / "tokenizer.json")
+
+    with open(model_dir / "model_config.json", "w") as f:
+        json.dump(
+            {
+                "max_len": args.max_len,
+                "d_model": args.d_model,
+                "num_layers": args.num_layers,
+                "num_heads": args.num_heads,
+                "d_ff": args.d_ff,
+                "learning_rate": args.learning_rate,
+            },
+            f,
+        )
 
 
 if __name__ == "__main__":
