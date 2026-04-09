@@ -74,6 +74,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         num_layers: int = 2,
         num_heads: int = 1,
         d_ff: int = 8,
+        learning_rate: float = 0.1,
     ) -> None:
         super().__init__()
 
@@ -88,6 +89,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         )
         self.final_norm = nn.LayerNorm(normalized_shape=d_model)
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)
+        self.learning_rate = learning_rate
 
         # ---------------------------------------------------------
         # Keep the loss local to the model so Lightning can call the
@@ -132,7 +134,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         # Use the same optimizer setup as before while keeping the
         # deeper architecture trainable with one entry point.
         # ---------------------------------------------------------
-        return Adam(self.parameters(), lr=0.1)
+        return Adam(self.parameters(), lr=self.learning_rate)
 
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         # ---------------------------------------------------------
