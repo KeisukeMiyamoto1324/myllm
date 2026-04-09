@@ -26,3 +26,23 @@ python inference.py
 - `inference.py`: loads the saved model and runs token generation
 - `transformer.py`, `self_attention.py`, `position_encoding.py`: core model components
 - `tokenizer.py`, `dataset.py`: tokenization and dataset utilities
+
+## Model Structure
+
+The model now follows a more standard decoder-only Transformer layout:
+
+- token embedding + positional encoding
+- repeated `DecoderBlock` layers
+- each block contains:
+  - masked multi-head self-attention
+  - residual connection
+  - layer normalization
+  - feed-forward network
+- final layer normalization + output projection
+
+You can control the model structure from `DecoderOnlyTransformer`:
+
+- `num_layers`: number of decoder blocks
+- `num_heads`: number of attention heads
+- `d_ff`: hidden size of the feed-forward layer
+- `d_model`: embedding / hidden size

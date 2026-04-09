@@ -5,14 +5,24 @@ from transformer import DecoderOnlyTransformer
 from tokenizer import Tokenizer
 
 
-prompt = "statquest is what <EOS>"
+prompt = "what is statquest <EOS>"
 max_len = 6
+num_layers = 2
+num_heads = 1
+d_ff = 8
 
 model_dir = Path(__file__).with_name("model")
 model_path = model_dir / "model.pth"
 tokenizer = Tokenizer.load(model_dir / "tokenizer.json")
 
-model = DecoderOnlyTransformer(num_tokens=len(tokenizer.vocabulary), d_model=2, max_len=max_len)
+model = DecoderOnlyTransformer(
+    num_tokens=len(tokenizer.vocabulary),
+    d_model=2,
+    max_len=max_len,
+    num_layers=num_layers,
+    num_heads=num_heads,
+    d_ff=d_ff,
+)
 
 state_dict = torch.load(model_path, map_location="cpu")
 model.load_state_dict(state_dict)
