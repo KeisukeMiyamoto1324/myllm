@@ -34,6 +34,7 @@ model = DecoderOnlyTransformer(
     num_heads=model_config["num_heads"],
     d_ff=model_config["d_ff"],
     learning_rate=model_config["learning_rate"],
+    pad_token_id=model_config["pad_token_id"],
 )
 
 state_dict = torch.load(model_path, map_location="cpu")
