@@ -5,7 +5,7 @@ from typing import Callable
 
 def get_dataset(
     sentences: list[str], 
-    tokenizer: Callable[[list[str], dict[str, int]], torch.Tensor]
+    tokenizer: Callable[[str], torch.Tensor]
 ) -> TensorDataset:
     inputs = torch.stack([
         tokenizer(sentence) 
