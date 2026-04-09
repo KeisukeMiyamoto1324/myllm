@@ -1,4 +1,6 @@
 import torch
+import json
+from pathlib import Path
 
 
 class Tokenizer:
@@ -17,3 +19,18 @@ class Tokenizer:
 
     def detokenizer(self, tokens: torch.Tensor) -> list[str]:
         return [self.id_to_token[token.item()] for token in tokens]
+
+    def save(self, path: str | Path) -> None:
+        with open(path, "w") as f:
+            json.dump({"id_to_token": self.id_to_token}, f)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Tokenizer":
+        with open(path) as f:
+            data = json.load(f)
+
+        tokenizer = cls()
+        tokenizer.id_to_token = data["id_to_token"]
+        tokenizer.vocabulary = set(tokenizer.id_to_token)
+        tokenizer.token_map = {token: i for i, token in enumerate(tokenizer.id_to_token)}
+        return tokenizer
