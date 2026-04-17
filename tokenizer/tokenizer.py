@@ -2,16 +2,15 @@
 # https://www.youtube.com/watch?v=HEikzVL-lZU&t=8s&pp=ygUOQnl0ZS1sZXZlbCBCUEU%3D
 
 class ByteLevelBPE:
-    def __init__(self) -> None:
+    def __init__(self, vocab_size=65536) -> None:
         self.sentences: list[str] = []
         self.vocab: dict[str, int] = {}
+        self.vocab_size = vocab_size
 
     def train(self, sentences: list[str]) -> None:
         self.sentences = sentences
         self.register_minimum_vocab()
         
-        
-
     def register_minimum_vocab(self) -> None:
         # ---------------------------------------------------------
         # Collect all unique characters once, then register them
