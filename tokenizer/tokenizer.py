@@ -8,8 +8,7 @@ class ByteLevelBPE:
         self.vocab_size = vocab_size
         self.unknown_token: bytes = b"|<unknown>|"
 
-    def train(self, sentences: list[str]) -> None:
-        self.sentences = sentences
+    def train(self) -> None:
         self.register_minimum_vocab()
 
     def register_minimum_vocab(self) -> None:
@@ -23,38 +22,32 @@ class ByteLevelBPE:
         self.vocab.setdefault(self.unknown_token, len(self.vocab) + 1)
 
     def merge_token(self) -> None:
-        for sentence in self.sentences:
-            pass
+        
 
     def tokenize(self, sentence: str) -> list[int]:
         # ---------------------------------------------------------
-        # Tokenize UTF-8 bytes by consuming the longest valid token
+        # Greedy longest-match tokenization on UTF-8 bytes
         # ---------------------------------------------------------
         if not sentence:
             return []
 
-        byte_sequence = sentence.encode("utf-8")
-        tokenized_sentence: list[int] = []
+        b = sentence.encode("utf-8")
+        res: list[int] = []
         start = 0
 
-        while start < len(byte_sequence):
+        while start < len(b):
             end = start + 1
-            current_vocab = bytes([byte_sequence[start]])
+            token = b[start:end]
 
-            while end < len(byte_sequence):
-                next_vocab = current_vocab + bytes([byte_sequence[end]])
-                if next_vocab not in self.vocab:
-                    break
-
-                current_vocab = next_vocab
+            while end <= len(b) and token in self.vocab:
                 end += 1
+                token = b[start:end]
 
-            tokenized_sentence.append(
-                self.vocab.get(current_vocab, self.vocab[self.unknown_token])
-            )
-            start = end
+            token = b[start:end-1]
+            res.append(self.vocab.get(token, self.vocab[self.unknown_token]))
+            start = end - 1
 
-        return tokenized_sentence
+        return res
 
 
 if __name__ == "__main__":
