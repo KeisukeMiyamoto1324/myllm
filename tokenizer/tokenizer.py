@@ -48,14 +48,27 @@ class ByteLevelBPE:
             return False
 
         # ---------------------------------------------------------
-        # Register the most frequent merged token into the vocabulary
+        # Select the most frequent pair that creates a new token
         # ---------------------------------------------------------
-        best_pair = max(pair_counts.items(), key=lambda x: x[1])[0]
+        sorted_pairs = sorted(pair_counts.items(), key=lambda x: x[1], reverse=True)
+        best_pair = next(
+            (pair for pair, _ in sorted_pairs if pair[0] + pair[1] not in self.vocab),
+            None,
+        )
+
+        # ---------------------------------------------------------
+        # Stop when every candidate has already been registered
+        # ---------------------------------------------------------
+        if best_pair is None:
+            return False
+
+        # ---------------------------------------------------------
+        # Register the selected merged token into the vocabulary
+        # ---------------------------------------------------------
         merged_token = best_pair[0] + best_pair[1]
-        vocab_size_before = len(self.vocab)
         self.vocab.setdefault(merged_token, len(self.vocab) + 1)
 
-        return len(self.vocab) > vocab_size_before
+        return True
 
     def split_into_tokens(self, sentence: str) -> list[bytes]:
         # ---------------------------------------------------------
@@ -93,7 +106,14 @@ if __name__ == "__main__":
     tokenizer = ByteLevelBPE()
     tokenizer.train(
         sentences=[
-            "Hello"
+            "Hello",
+            "Hello world",
+            "Hello there",
+            "Hi world",
+            "Byte level BPE",
+            "Byte pair encoding",
+            "Tokenizer test",
+            "Hello Hello",
         ]
     )
 
