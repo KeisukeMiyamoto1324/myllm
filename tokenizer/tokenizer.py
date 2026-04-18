@@ -9,15 +9,8 @@ class ByteLevelBPE:
         self.unknown_token: bytes = b"|<unknown>|"
 
     def train(self, sentences: list[str]) -> None:
-        # ---------------------------------------------------------
-        # Store training sentences and reset the vocabulary state
-        # ---------------------------------------------------------
         self.sentences = [sentence for sentence in sentences]
         self.vocab = {}
-
-        # ---------------------------------------------------------
-        # Register the initial byte vocabulary before BPE merges
-        # ---------------------------------------------------------
         self.register_minimum_vocab()
 
         # ---------------------------------------------------------
@@ -75,9 +68,6 @@ class ByteLevelBPE:
         tokens: list[bytes] = []
         start = 0
 
-        # ---------------------------------------------------------
-        # Reuse the same longest-match logic used by tokenize()
-        # ---------------------------------------------------------
         while start < len(b):
             end = start + 1
             token = b[start:end]
@@ -92,15 +82,9 @@ class ByteLevelBPE:
         return tokens
 
     def tokenize(self, sentence: str) -> list[int]:
-        # ---------------------------------------------------------
-        # Greedy longest-match tokenization on UTF-8 bytes
-        # ---------------------------------------------------------
         if not sentence:
             return []
 
-        # ---------------------------------------------------------
-        # Convert the greedy byte tokens into vocabulary ids
-        # ---------------------------------------------------------
         tokens = self.split_into_tokens(sentence)
         return [self.vocab.get(token, self.vocab[self.unknown_token]) for token in tokens]
 
