@@ -1,8 +1,10 @@
 
 # https://www.youtube.com/watch?v=HEikzVL-lZU&t=8s&pp=ygUOQnl0ZS1sZXZlbCBCUEU%3D
 
+import json
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import Path
 
 
 @dataclass
@@ -169,6 +171,52 @@ class ByteLevelBPE:
 
         tokens = self.split_into_tokens(sentence)
         return [self.vocab[token] for token in tokens]
+
+    def save(self, path: str | Path) -> None:
+        vocab_items = [
+            {"token_hex": token.hex(), "id": token_id}
+            for token, token_id in sorted(self.vocab.items(), key=lambda x: x[1])
+        ]
+        data = {
+            "vocab_size": self.vocab_size,
+            "pad_token": self.pad_token,
+            "unknown_token": self.unknown_token,
+            "bos_token": self.bos_token,
+            "eos_token": self.eos_token,
+            "sep_token": self.sep_token,
+            "cls_token": self.cls_token,
+            "mask_token": self.mask_token,
+            "extra_special_tokens": self.extra_special_tokens,
+            "special_tokens": [token.hex() for token in self.special_tokens],
+            "vocab": vocab_items,
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "ByteLevelBPE":
+        with open(path) as f:
+            data = json.load(f)
+
+        tokenizer = cls(
+            vocab_size=data["vocab_size"],
+            pad_token=data["pad_token"],
+            unknown_token=data["unknown_token"],
+            bos_token=data["bos_token"],
+            eos_token=data["eos_token"],
+            sep_token=data["sep_token"],
+            cls_token=data["cls_token"],
+            mask_token=data["mask_token"],
+            extra_special_tokens=data["extra_special_tokens"],
+        )
+        tokenizer.special_tokens = [bytes.fromhex(token) for token in data["special_tokens"]]
+        tokenizer.vocab = {
+            bytes.fromhex(item["token_hex"]): item["id"]
+            for item in data["vocab"]
+        }
+
+        return tokenizer
 
 
 if __name__ == "__main__":
