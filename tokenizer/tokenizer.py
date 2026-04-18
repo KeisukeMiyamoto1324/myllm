@@ -8,8 +8,23 @@ class ByteLevelBPE:
         self.vocab_size = vocab_size
         self.unknown_token: bytes = b"|<unknown>|"
 
-    def train(self) -> None:
+    def train(self, sentences: list[str]) -> None:
+        # ---------------------------------------------------------
+        # Store training sentences and reset the vocabulary state
+        # ---------------------------------------------------------
+        self.sentences = [sentence for sentence in sentences]
+        self.vocab = {}
+
+        # ---------------------------------------------------------
+        # Register the initial byte vocabulary before BPE merges
+        # ---------------------------------------------------------
         self.register_minimum_vocab()
+
+        # ---------------------------------------------------------
+        # Repeat one merge at a time until the target size is reached
+        # ---------------------------------------------------------
+        while len(self.vocab) < self.vocab_size and self.merge_token():
+            continue
 
     def register_minimum_vocab(self) -> None:
         # ---------------------------------------------------------
@@ -21,20 +36,48 @@ class ByteLevelBPE:
 
         self.vocab.setdefault(self.unknown_token, len(self.vocab) + 1)
 
-    def merge_token(self) -> None:
-        
-
-    def tokenize(self, sentence: str) -> list[int]:
+    def merge_token(self) -> bool:
         # ---------------------------------------------------------
-        # Greedy longest-match tokenization on UTF-8 bytes
+        # Count adjacent token pairs across all current tokenizations
+        # ---------------------------------------------------------
+        pair_counts: dict[tuple[bytes, bytes], int] = {}
+        tokenized_sentences = [self.split_into_tokens(sentence) for sentence in self.sentences]
+
+        for tokens in tokenized_sentences:
+            for i in range(len(tokens) - 1):
+                pair = (tokens[i], tokens[i + 1])
+                pair_counts[pair] = pair_counts.get(pair, 0) + 1
+
+        # ---------------------------------------------------------
+        # Stop when no merge candidate remains in the corpus
+        # ---------------------------------------------------------
+        if not pair_counts:
+            return False
+
+        # ---------------------------------------------------------
+        # Register the most frequent merged token into the vocabulary
+        # ---------------------------------------------------------
+        best_pair = max(pair_counts.items(), key=lambda x: x[1])[0]
+        merged_token = best_pair[0] + best_pair[1]
+        vocab_size_before = len(self.vocab)
+        self.vocab.setdefault(merged_token, len(self.vocab) + 1)
+
+        return len(self.vocab) > vocab_size_before
+
+    def split_into_tokens(self, sentence: str) -> list[bytes]:
+        # ---------------------------------------------------------
+        # Split the sentence bytes with the current greedy vocabulary
         # ---------------------------------------------------------
         if not sentence:
             return []
 
         b = sentence.encode("utf-8")
-        res: list[int] = []
+        tokens: list[bytes] = []
         start = 0
 
+        # ---------------------------------------------------------
+        # Reuse the same longest-match logic used by tokenize()
+        # ---------------------------------------------------------
         while start < len(b):
             end = start + 1
             token = b[start:end]
@@ -43,11 +86,23 @@ class ByteLevelBPE:
                 end += 1
                 token = b[start:end]
 
-            token = b[start:end-1]
-            res.append(self.vocab.get(token, self.vocab[self.unknown_token]))
+            tokens.append(b[start:end - 1])
             start = end - 1
 
-        return res
+        return tokens
+
+    def tokenize(self, sentence: str) -> list[int]:
+        # ---------------------------------------------------------
+        # Greedy longest-match tokenization on UTF-8 bytes
+        # ---------------------------------------------------------
+        if not sentence:
+            return []
+
+        # ---------------------------------------------------------
+        # Convert the greedy byte tokens into vocabulary ids
+        # ---------------------------------------------------------
+        tokens = self.split_into_tokens(sentence)
+        return [self.vocab.get(token, self.vocab[self.unknown_token]) for token in tokens]
 
 
 if __name__ == "__main__":
