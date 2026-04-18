@@ -1,16 +1,55 @@
 
 # https://www.youtube.com/watch?v=HEikzVL-lZU&t=8s&pp=ygUOQnl0ZS1sZXZlbCBCUEU%3D
 
+from dataclasses import dataclass
+from dataclasses import field
+
+
+@dataclass
 class ByteLevelBPE:
-    def __init__(self, vocab_size: int = 65536) -> None:
-        self.sentences: list[str] = []
-        self.vocab: dict[bytes, int] = {}
-        self.vocab_size = vocab_size
-        self.unknown_token: bytes = b"|<unknown>|"
+    vocab_size: int = 65536
+    pad_token: str = "|<pad>|"
+    unknown_token: str = "|<unknown>|"
+    bos_token: str = "|<bos>|"
+    eos_token: str = "|<eos>|"
+    sep_token: str = "|<sep>|"
+    cls_token: str = "|<cls>|"
+    mask_token: str = "|<mask>|"
+    extra_special_tokens: list[str] = field(default_factory=list)
+    sentences: list[str] = field(default_factory=list, init=False)
+    vocab: dict[bytes, int] = field(default_factory=dict, init=False)
+    special_tokens: list[bytes] = field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        # ---------------------------------------------------------
+        # Collect the special tokens configured at initialization
+        # ---------------------------------------------------------
+        initial_tokens = [
+            self.pad_token,
+            self.unknown_token,
+            self.bos_token,
+            self.eos_token,
+            self.sep_token,
+            self.cls_token,
+            self.mask_token,
+        ]
+
+        # ---------------------------------------------------------
+        # Register the init-time special tokens in a stable order
+        # ---------------------------------------------------------
+        self.special_tokens = []
+        self.add_special_tokens(initial_tokens + self.extra_special_tokens)
 
     def train(self, sentences: list[str]) -> None:
+        # ---------------------------------------------------------
+        # Store the training corpus and reset the current vocabulary
+        # ---------------------------------------------------------
         self.sentences = [sentence for sentence in sentences]
         self.vocab = {}
+
+        # ---------------------------------------------------------
+        # Register bytes and special tokens before BPE merges
+        # ---------------------------------------------------------
         self.register_minimum_vocab()
 
         # ---------------------------------------------------------
@@ -27,7 +66,28 @@ class ByteLevelBPE:
             byte_token = bytes([i])
             self.vocab.setdefault(byte_token, len(self.vocab) + 1)
 
-        self.vocab.setdefault(self.unknown_token, len(self.vocab) + 1)
+        # ---------------------------------------------------------
+        # Register all configured special tokens after byte tokens
+        # ---------------------------------------------------------
+        for special_token in self.special_tokens:
+            self.vocab.setdefault(special_token, len(self.vocab) + 1)
+
+    def add_special_token(self, token: str) -> bytes:
+        # ---------------------------------------------------------
+        # Encode and store one special token if it is not registered
+        # ---------------------------------------------------------
+        token_bytes = token.encode("utf-8")
+
+        if token and token_bytes not in self.special_tokens:
+            self.special_tokens.append(token_bytes)
+
+        return token_bytes
+
+    def add_special_tokens(self, tokens: list[str]) -> list[bytes]:
+        # ---------------------------------------------------------
+        # Register multiple special tokens with one consistent flow
+        # ---------------------------------------------------------
+        return [self.add_special_token(token) for token in tokens if token]
 
     def merge_token(self) -> bool:
         # ---------------------------------------------------------
@@ -36,6 +96,9 @@ class ByteLevelBPE:
         pair_counts: dict[tuple[bytes, bytes], int] = {}
         tokenized_sentences = [self.split_into_tokens(sentence) for sentence in self.sentences]
 
+        # ---------------------------------------------------------
+        # Aggregate pair frequencies over the entire training corpus
+        # ---------------------------------------------------------
         for tokens in tokenized_sentences:
             for i in range(len(tokens) - 1):
                 pair = (tokens[i], tokens[i + 1])
@@ -81,6 +144,9 @@ class ByteLevelBPE:
         tokens: list[bytes] = []
         start = 0
 
+        # ---------------------------------------------------------
+        # Select the longest token that already exists in the vocab
+        # ---------------------------------------------------------
         while start < len(b):
             end = start + 1
             token = b[start:end]
@@ -95,15 +161,18 @@ class ByteLevelBPE:
         return tokens
 
     def tokenize(self, sentence: str) -> list[int]:
+        # ---------------------------------------------------------
+        # Convert the greedy byte split into vocabulary ids
+        # ---------------------------------------------------------
         if not sentence:
             return []
 
         tokens = self.split_into_tokens(sentence)
-        return [self.vocab.get(token, self.vocab[self.unknown_token]) for token in tokens]
+        return [self.vocab[token] for token in tokens]
 
 
 if __name__ == "__main__":
-    tokenizer = ByteLevelBPE()
+    tokenizer = ByteLevelBPE(vocab_size=270)
     tokenizer.train(
         sentences=[
             "Hello",
@@ -118,4 +187,4 @@ if __name__ == "__main__":
     )
 
     print(dict(sorted(tokenizer.vocab.items(), key=lambda x: x[1])))
-    print(tokenizer.tokenize("Hello"))
+    print(tokenizer.tokenize("Hello Japan!!"))
