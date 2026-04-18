@@ -142,6 +142,9 @@ class ByteLevelBPE:
         if not sentence:
             return []
 
+        if not self.vocab:
+            raise ValueError("Tokenizer vocabulary is empty. Train or load the tokenizer before tokenizing.")
+
         b = sentence.encode("utf-8")
         tokens: list[bytes] = []
         start = 0
@@ -157,7 +160,12 @@ class ByteLevelBPE:
                 end += 1
                 token = b[start:end]
 
-            tokens.append(b[start:end - 1])
+            selected_token = b[start:end - 1]
+
+            if not selected_token:
+                raise ValueError("Tokenizer vocabulary does not contain the required byte token.")
+
+            tokens.append(selected_token)
             start = end - 1
 
         return tokens
@@ -221,6 +229,7 @@ class ByteLevelBPE:
 
 if __name__ == "__main__":
     tokenizer = ByteLevelBPE(vocab_size=270)
+
     tokenizer.train(
         sentences=[
             "Hello",
@@ -236,3 +245,4 @@ if __name__ == "__main__":
 
     print(dict(sorted(tokenizer.vocab.items(), key=lambda x: x[1])))
     print(tokenizer.tokenize("Hello Japan!!"))
+    tokenizer.save("tokenizer.json")
