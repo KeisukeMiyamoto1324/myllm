@@ -7,8 +7,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset import get_dataset
-from text_preprocessor import format_sentences, load_sentences
-from tokenizer import Tokenizer
+from text_preprocessor import load_sentences
+from tokenizer_rust.tokenizer import ByteLevelBPE
 from transformer import DecoderOnlyTransformer
 
 
@@ -31,6 +31,52 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def format_sentences(
+    raw_sentences: list[str],
+    max_len: int,
+    eos_token: str,
+    pad_token: str,
+) -> list[str]:
+    # ---------------------------------------------------------
+    # Normalize each sentence into the fixed-length training
+    # format with tokenizer-defined EOS and PAD tokens.
+    # ---------------------------------------------------------
+    return [
+        _format_sentence(
+            sentence=sentence,
+            max_len=max_len,
+            eos_token=eos_token,
+            pad_token=pad_token,
+        )
+        for sentence in raw_sentences
+    ]
+
+
+def _format_sentence(
+    sentence: str,
+    max_len: int,
+    eos_token: str,
+    pad_token: str,
+) -> str:
+    # ---------------------------------------------------------
+    # Truncate the sentence, append EOS, and pad the remainder
+    # so every sample keeps the same token count.
+    # ---------------------------------------------------------
+    tokens = sentence.split()[: max_len - 1]
+    padded_tokens = tokens + [eos_token]
+    padding_size = max_len - len(padded_tokens)
+    return " ".join(padded_tokens + [pad_token for _ in range(padding_size)])
+
+
+def encode_sentence(tokenizer: ByteLevelBPE, sentence: str) -> torch.Tensor:
+    # ---------------------------------------------------------
+    # Convert one sentence into a tensor of token ids so the
+    # existing dataset builder can keep its interface.
+    # ---------------------------------------------------------
+    token_ids = tokenizer.tokenize(sentence=sentence)
+    return torch.tensor(token_ids, dtype=torch.long)
+
+
 def main() -> None:
     # ---------------------------------------------------------
     # Parse CLI arguments and resolve the training data and
@@ -44,22 +90,27 @@ def main() -> None:
     # Load the raw training text and apply the shared sentence
     # formatting rule before dataset construction.
     # ---------------------------------------------------------
+    tokenizer = ByteLevelBPE.load(tokenizer_path)
     raw_sentences = load_sentences(path=train_data_path)
-    sentences = format_sentences(raw_sentences=raw_sentences, max_len=args.max_len)
+    sentences = format_sentences(
+        raw_sentences=raw_sentences,
+        max_len=args.max_len,
+        eos_token=tokenizer.eos_token,
+        pad_token=tokenizer.pad_token,
+    )
 
     # ---------------------------------------------------------
-    # Create the output directory and load the saved tokenizer
+    # Create the output directory and derive the PAD token id
     # before building the dataset and data loader.
     # ---------------------------------------------------------
     model_dir = Path(__file__).with_name("model")
     model_dir.mkdir(exist_ok=True)
 
-    tokenizer = Tokenizer.load(tokenizer_path)
-    pad_token_id = tokenizer.tokenizer("<PAD>").item()
+    pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
 
     dataset = get_dataset(
         sentences=sentences,
-        tokenizer=tokenizer.tokenizer,
+        tokenizer=lambda sentence: encode_sentence(tokenizer=tokenizer, sentence=sentence),
         pad_token_id=pad_token_id,
     )
     dataloader = DataLoader(dataset, batch_size=args.batch_size)
@@ -69,7 +120,7 @@ def main() -> None:
     # and run Lightning training.
     # ---------------------------------------------------------
     model = DecoderOnlyTransformer(
-        num_tokens=len(tokenizer.vocabulary),
+        num_tokens=tokenizer.get_vocab_size(),
         d_model=args.d_model,
         max_len=args.max_len,
         num_layers=args.num_layers,

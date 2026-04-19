@@ -74,6 +74,29 @@ class ByteLevelBPE:
         # ---------------------------------------------------------
         return self.tokenizer.decode(token_ids)
 
+    def token_to_id(self, token: str) -> int:
+        # ---------------------------------------------------------
+        # Resolve one token string into its vocabulary id so
+        # training and inference can reuse tokenizer metadata.
+        # ---------------------------------------------------------
+        token_id = self.tokenizer.token_to_id(token)
+
+        # ---------------------------------------------------------
+        # Reject missing tokens because the saved tokenizer must
+        # already include the configured special tokens.
+        # ---------------------------------------------------------
+        if token_id is None:
+            raise ValueError(f"Token is not registered in the tokenizer: {token}")
+
+        return token_id
+
+    def get_vocab_size(self) -> int:
+        # ---------------------------------------------------------
+        # Return the serialized vocabulary size so model shapes
+        # stay aligned with the tokenizer artifact.
+        # ---------------------------------------------------------
+        return self.tokenizer.get_vocab_size()
+
     def save(self, path: str | Path) -> None:
         # ---------------------------------------------------------
         # Save the tokenizer as a single JSON artifact that can
