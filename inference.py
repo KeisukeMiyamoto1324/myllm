@@ -3,6 +3,7 @@ from pathlib import Path
 
 import torch
 
+from device_utils import resolve_device
 from tokenizer import Tokenizer
 from transformer import DecoderOnlyTransformer
 
@@ -12,6 +13,7 @@ prompt = "the book"
 
 model_dir = Path(__file__).with_name("model")
 model_path = model_dir / "model.pth"
+device = resolve_device()
 
 # ---------------------------------------------------------
 # Load the tokenizer and the saved model configuration so
@@ -37,15 +39,16 @@ model = DecoderOnlyTransformer(
     pad_token_id=model_config["pad_token_id"],
 )
 
-state_dict = torch.load(model_path, map_location="cpu")
+state_dict = torch.load(model_path, map_location=device)
 model.load_state_dict(state_dict)
+model.to(device)
 model.eval()
 
 # ---------------------------------------------------------
 # Encode the prompt and keep the saved sequence length as the
 # upper limit for autoregressive token generation.
 # ---------------------------------------------------------
-model_input = tokenizer.tokenizer(words=prompt).unsqueeze(0)
+model_input = tokenizer.tokenizer(words=prompt).unsqueeze(0).to(device)
 input_length = model_input.size(dim=1)
 max_len = model_config["max_len"]
 eos_token_id = tokenizer.tokenizer("<EOS>").item()
@@ -68,4 +71,5 @@ with torch.no_grad():
         predicted_id = torch.argmax(predictions[:, -1, :], dim=-1, keepdim=True)
         predicted_ids = torch.cat((predicted_ids, predicted_id), dim=1)
 
-print(f"predicted tokens: {tokenizer.detokenizer(tokens=predicted_ids.squeeze(0))}")
+predicted_tokens = predicted_ids.squeeze(0).detach().cpu()
+print(f"predicted tokens: {tokenizer.detokenizer(tokens=predicted_tokens)}")

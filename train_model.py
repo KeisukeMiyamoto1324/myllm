@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from dataset import FineWebEduDataset
+from device_utils import resolve_accelerator
 from tokenizer_rust.tokenizer import ByteLevelBPE
 from transformer import DecoderOnlyTransformer
 
@@ -40,6 +41,7 @@ def main() -> None:
     # ---------------------------------------------------------
     args = parse_args()
     tokenizer = ByteLevelBPE.load(Path(args.tokenizer_path))
+    accelerator = resolve_accelerator()
 
     # ---------------------------------------------------------
     # Create the output directory and resolve the tokenizer ids
@@ -64,7 +66,7 @@ def main() -> None:
         dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=accelerator == "cuda",
         persistent_workers=args.num_workers > 0,
     )
 
@@ -83,7 +85,15 @@ def main() -> None:
         pad_token_id=pad_token_id,
     )
 
-    trainer = L.Trainer(max_steps=args.max_steps)
+    # ---------------------------------------------------------
+    # Let Lightning place the model on CUDA or MPS when those
+    # backends are available on the current machine.
+    # ---------------------------------------------------------
+    trainer = L.Trainer(
+        max_steps=args.max_steps,
+        accelerator=accelerator,
+        devices=1,
+    )
     trainer.fit(model, train_dataloaders=dataloader)
 
     # ---------------------------------------------------------
