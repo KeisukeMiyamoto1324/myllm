@@ -1,2 +1,5 @@
 torch
 lightning
+tqdm
+datasets
+tokenizers
