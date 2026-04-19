@@ -4,6 +4,7 @@ from pathlib import Path
 
 import lightning as L
 import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
 from dataset import FineWebEduDataset
@@ -27,9 +28,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-heads", type=int, default=8)
     parser.add_argument("--d-ff", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--max-steps", type=int, default=1000)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--max-steps", type=int, default=25600)
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--val-split-modulo", type=int, default=100)
+    parser.add_argument("--val-split-index", type=int, default=0)
+    parser.add_argument("--val-batches", type=int, default=64)
+    parser.add_argument("--val-check-interval", type=int, default=1000)
+    parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
     parser.add_argument("--tokenizer-path", type=str, default="model/tokenizer.json")
     return parser.parse_args()
 
@@ -49,21 +55,45 @@ def main() -> None:
     # ---------------------------------------------------------
     model_dir = Path(__file__).with_name("model")
     model_dir.mkdir(exist_ok=True)
+    checkpoint_dir = model_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
+    train_split_indexes = tuple(
+        split_index
+        for split_index in range(args.val_split_modulo)
+        if split_index != args.val_split_index
+    )
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
     # ---------------------------------------------------------
-    # Stream FineWeb-Edu directly from Hugging Face so training
-    # can scale without loading the full dataset into memory.
+    # Stream FineWeb-Edu directly from Hugging Face and split the
+    # stream deterministically into training and validation sets.
     # ---------------------------------------------------------
-    dataset = FineWebEduDataset(
+    train_dataset = FineWebEduDataset(
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
         eos_token_id=eos_token_id,
+        split_modulo=args.val_split_modulo,
+        split_indexes=train_split_indexes,
     )
-    dataloader = DataLoader(
-        dataset,
+    val_dataset = FineWebEduDataset(
+        tokenizer=tokenizer,
+        max_len=args.max_len,
+        pad_token_id=pad_token_id,
+        eos_token_id=eos_token_id,
+        split_modulo=args.val_split_modulo,
+        split_indexes=(args.val_split_index,),
+    )
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=accelerator == "cuda",
+        persistent_workers=args.num_workers > 0,
+    )
+    val_dataloader = DataLoader(
+        val_dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=accelerator == "cuda",
@@ -86,15 +116,45 @@ def main() -> None:
     )
 
     # ---------------------------------------------------------
+    # Save both periodic checkpoints and the best validation model
+    # so training progress can be resumed or selected later.
+    # ---------------------------------------------------------
+    callbacks = [
+        ModelCheckpoint(
+            dirpath=checkpoint_dir,
+            filename="step-{step}",
+            every_n_train_steps=args.checkpoint_every_n_steps,
+            save_top_k=-1,
+            save_on_train_epoch_end=False,
+        ),
+        ModelCheckpoint(
+            dirpath=checkpoint_dir,
+            filename="best-step={step}-val_loss={val_loss:.4f}",
+            monitor="val_loss",
+            mode="min",
+            save_top_k=1,
+            save_last=True,
+        ),
+    ]
+
+    # ---------------------------------------------------------
     # Let Lightning place the model on CUDA or MPS when those
-    # backends are available on the current machine.
+    # backends are available and run periodic validation checks.
     # ---------------------------------------------------------
     trainer = L.Trainer(
         max_steps=args.max_steps,
         accelerator=accelerator,
         devices=1,
+        callbacks=callbacks,
+        val_check_interval=args.val_check_interval,
+        limit_val_batches=args.val_batches,
+        num_sanity_val_steps=0,
     )
-    trainer.fit(model, train_dataloaders=dataloader)
+    trainer.fit(
+        model,
+        train_dataloaders=train_dataloader,
+        val_dataloaders=val_dataloader,
+    )
 
     # ---------------------------------------------------------
     # Save the trained weights and configuration so inference
@@ -112,6 +172,8 @@ def main() -> None:
                 "d_ff": args.d_ff,
                 "learning_rate": args.learning_rate,
                 "pad_token_id": pad_token_id,
+                "val_split_modulo": args.val_split_modulo,
+                "val_split_index": args.val_split_index,
             },
             f,
         )

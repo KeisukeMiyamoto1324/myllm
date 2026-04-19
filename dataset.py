@@ -15,6 +15,8 @@ class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
         max_len: int,
         pad_token_id: int,
         eos_token_id: int,
+        split_modulo: int = 1,
+        split_indexes: tuple[int, ...] = (0,),
     ) -> None:
         super().__init__()
 
@@ -26,6 +28,8 @@ class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
         self.max_len = max_len
         self.pad_token_id = pad_token_id
         self.eos_token_id = eos_token_id
+        self.split_modulo = split_modulo
+        self.split_indexes = split_indexes
 
     def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         # ---------------------------------------------------------
@@ -48,10 +52,17 @@ class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
             dataset = dataset.shard(num_shards=worker_info.num_workers, index=worker_info.id)
 
         # ---------------------------------------------------------
-        # Tokenize each streamed document into one fixed-length
-        # training sequence chunk and yield it immediately.
+        # Route each streamed document into the configured split so
+        # training and validation consume disjoint samples.
         # ---------------------------------------------------------
-        for sample in dataset:
+        for sample_index, sample in enumerate(dataset):
+            if sample_index % self.split_modulo not in self.split_indexes:
+                continue
+
+            # ---------------------------------------------------------
+            # Tokenize each streamed document into fixed-length
+            # training sequence chunks and yield them immediately.
+            # ---------------------------------------------------------
             yield from self._create_examples(text=sample["text"])
 
     def _create_examples(self, text: str) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
