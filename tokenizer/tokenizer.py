@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 
+from tqdm import tqdm
+
 
 @dataclass
 class ByteLevelBPE:
@@ -53,12 +55,18 @@ class ByteLevelBPE:
         # Register bytes and special tokens before BPE merges
         # ---------------------------------------------------------
         self.register_minimum_vocab()
+        progress = tqdm(total=self.vocab_size - len(self.vocab), desc="ByteLevelBPE")
 
         # ---------------------------------------------------------
         # Repeat one merge at a time until the target size is reached
         # ---------------------------------------------------------
         while len(self.vocab) < self.vocab_size and self.merge_token():
-            continue
+            progress.update(1)
+
+        # ---------------------------------------------------------
+        # Close the progress bar after the merge loop finishes
+        # ---------------------------------------------------------
+        progress.close()
 
     def register_minimum_vocab(self) -> None:
         # ---------------------------------------------------------
