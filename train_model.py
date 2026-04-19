@@ -82,14 +82,14 @@ def parse_args() -> argparse.Namespace:
     # defines the vocabulary and special token ids used in training.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-len", type=int, default=256)
+    parser.add_argument("--max-len", type=int, default=512)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--num-layers", type=int, default=16)
     parser.add_argument("--num-heads", type=int, default=8)
     parser.add_argument("--d-ff", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--max-steps", type=int, default=25600)
+    parser.add_argument("--max-steps", type=int, default=12800)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
     parser.add_argument("--val-split-index", type=int, default=0)
