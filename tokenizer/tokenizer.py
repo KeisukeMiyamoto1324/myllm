@@ -102,14 +102,17 @@ class ByteLevelBPE:
     def merge_token(self) -> bool:
         # ---------------------------------------------------------
         # Count adjacent token pairs across all current tokenizations
+        # without materializing the full tokenized corpus in memory.
         # ---------------------------------------------------------
         pair_counts: dict[tuple[bytes, bytes], int] = {}
-        tokenized_sentences = [self.split_into_tokens(sentence) for sentence in self.sentences]
 
         # ---------------------------------------------------------
         # Aggregate pair frequencies over the entire training corpus
+        # one sentence at a time to keep memory usage bounded.
         # ---------------------------------------------------------
-        for tokens in tokenized_sentences:
+        for sentence in self.sentences:
+            tokens = self.split_into_tokens(sentence)
+
             for i in range(len(tokens) - 1):
                 pair = (tokens[i], tokens[i + 1])
                 pair_counts[pair] = pair_counts.get(pair, 0) + 1
