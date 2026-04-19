@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 
@@ -8,69 +9,132 @@ from tokenizer_rust.tokenizer import ByteLevelBPE
 from transformer import DecoderOnlyTransformer
 
 
-# prompt = "what is statquest <EOS>"
-prompt = "Dogs are"
+def parse_args() -> argparse.Namespace:
+    # ---------------------------------------------------------
+    # Define the CLI arguments required to select the prompt,
+    # model directory, and generation length for inference.
+    # ---------------------------------------------------------
+    parser = argparse.ArgumentParser()
+    parser.add_argument("prompt", type=str)
+    parser.add_argument("--model-dir", type=str, default="model")
+    parser.add_argument("--max-new-tokens", type=int, default=64)
+    return parser.parse_args()
 
-model_dir = Path(__file__).with_name("model")
-model_path = model_dir / "model.pth"
-device = resolve_device()
 
-# ---------------------------------------------------------
-# Load the tokenizer and the saved model configuration so
-# inference uses the same architecture as training.
-# ---------------------------------------------------------
-tokenizer = ByteLevelBPE.load(model_dir / "tokenizer.json")
+def load_model_config(model_dir: Path) -> dict[str, int | float]:
+    # ---------------------------------------------------------
+    # Load the saved model configuration so inference rebuilds
+    # the same Transformer architecture used for training.
+    # ---------------------------------------------------------
+    with open(model_dir / "model_config.json") as f:
+        return json.load(f)
 
-with open(model_dir / "model_config.json") as f:
-    model_config = json.load(f)
 
-# ---------------------------------------------------------
-# Rebuild the Transformer with the saved hyper-parameters
-# before restoring the trained weights.
-# ---------------------------------------------------------
-model = DecoderOnlyTransformer(
-    num_tokens=tokenizer.get_vocab_size(),
-    d_model=model_config["d_model"],
-    max_len=model_config["max_len"],
-    num_layers=model_config["num_layers"],
-    num_heads=model_config["num_heads"],
-    d_ff=model_config["d_ff"],
-    learning_rate=model_config["learning_rate"],
-    pad_token_id=model_config["pad_token_id"],
-)
+def build_model(
+    tokenizer: ByteLevelBPE,
+    model_config: dict[str, int | float],
+    model_path: Path,
+    device: torch.device,
+) -> DecoderOnlyTransformer:
+    # ---------------------------------------------------------
+    # Recreate the Transformer from the saved hyper-parameters
+    # and restore the trained weights onto the target device.
+    # ---------------------------------------------------------
+    model = DecoderOnlyTransformer(
+        num_tokens=tokenizer.get_vocab_size(),
+        d_model=int(model_config["d_model"]),
+        max_len=int(model_config["max_len"]),
+        num_layers=int(model_config["num_layers"]),
+        num_heads=int(model_config["num_heads"]),
+        d_ff=int(model_config["d_ff"]),
+        learning_rate=float(model_config["learning_rate"]),
+        pad_token_id=int(model_config["pad_token_id"]),
+    )
 
-state_dict = torch.load(model_path, map_location=device)
-model.load_state_dict(state_dict)
-model.to(device)
-model.eval()
+    state_dict = torch.load(model_path, map_location=device)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+    return model
 
-# ---------------------------------------------------------
-# Encode the prompt and keep the saved sequence length as the
-# upper limit for autoregressive token generation.
-# ---------------------------------------------------------
-prompt_token_ids = tokenizer.tokenize(sentence=prompt)
-model_input = torch.tensor(prompt_token_ids, dtype=torch.long).unsqueeze(0).to(device)
-input_length = model_input.size(dim=1)
-max_len = model_config["max_len"]
-eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
-# ---------------------------------------------------------
-# Generate one token at a time until EOS appears or the saved
-# maximum sequence length is reached.
-# ---------------------------------------------------------
-with torch.no_grad():
-    predictions = model(model_input)
-    predicted_id = torch.argmax(predictions[:, -1, :], dim=-1, keepdim=True)
-    predicted_ids = predicted_id
+def generate_token_ids(
+    model: DecoderOnlyTransformer,
+    tokenizer: ByteLevelBPE,
+    prompt: str,
+    max_len: int,
+    max_new_tokens: int,
+    device: torch.device,
+) -> list[int]:
+    # ---------------------------------------------------------
+    # Encode the prompt into token ids and move the initial
+    # sequence onto the target device for autoregressive use.
+    # ---------------------------------------------------------
+    prompt_token_ids = tokenizer.tokenize(sentence=prompt)
+    model_input = torch.tensor(prompt_token_ids, dtype=torch.long).unsqueeze(0).to(device)
+    eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
+    max_generation_steps = min(max_len, len(prompt_token_ids) + max_new_tokens)
 
-    for _ in range(input_length, max_len):
-        if predicted_id.item() == eos_token_id:
-            break
-
-        model_input = torch.cat((model_input, predicted_id), dim=1)
+    # ---------------------------------------------------------
+    # Predict one token at a time until EOS appears or the
+    # configured generation length limit is reached.
+    # ---------------------------------------------------------
+    with torch.no_grad():
         predictions = model(model_input)
         predicted_id = torch.argmax(predictions[:, -1, :], dim=-1, keepdim=True)
-        predicted_ids = torch.cat((predicted_ids, predicted_id), dim=1)
+        generated_ids = predicted_id
 
-generated_token_ids = predicted_ids.squeeze(0).detach().cpu().tolist()
-print(f"predicted tokens: {tokenizer.detokenize(token_ids=generated_token_ids)}")
+        for _ in range(model_input.size(dim=1), max_generation_steps):
+            if predicted_id.item() == eos_token_id:
+                break
+
+            model_input = torch.cat((model_input, predicted_id), dim=1)
+            predictions = model(model_input)
+            predicted_id = torch.argmax(predictions[:, -1, :], dim=-1, keepdim=True)
+            generated_ids = torch.cat((generated_ids, predicted_id), dim=1)
+
+    return generated_ids.squeeze(0).detach().cpu().tolist()
+
+
+def main() -> None:
+    # ---------------------------------------------------------
+    # Parse the CLI arguments and resolve the saved model files
+    # used to run inference with the trained artifacts.
+    # ---------------------------------------------------------
+    args = parse_args()
+    model_dir = Path(args.model_dir)
+    model_path = model_dir / "model.pth"
+    tokenizer_path = model_dir / "tokenizer.json"
+    device = resolve_device()
+
+    # ---------------------------------------------------------
+    # Load the tokenizer and model configuration before the
+    # model weights are reconstructed on the active device.
+    # ---------------------------------------------------------
+    tokenizer = ByteLevelBPE.load(tokenizer_path)
+    model_config = load_model_config(model_dir=model_dir)
+    model = build_model(
+        tokenizer=tokenizer,
+        model_config=model_config,
+        model_path=model_path,
+        device=device,
+    )
+
+    # ---------------------------------------------------------
+    # Generate token ids from the prompt and decode them into
+    # text with the same tokenizer used during training.
+    # ---------------------------------------------------------
+    generated_token_ids = generate_token_ids(
+        model=model,
+        tokenizer=tokenizer,
+        prompt=args.prompt,
+        max_len=int(model_config["max_len"]),
+        max_new_tokens=args.max_new_tokens,
+        device=device,
+    )
+    generated_text = tokenizer.detokenize(token_ids=generated_token_ids)
+    print(f"predicted tokens: {generated_text}")
+
+
+if __name__ == "__main__":
+    main()
