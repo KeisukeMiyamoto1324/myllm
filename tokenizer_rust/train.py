@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-path",
         type=str,
-        default="tokenizer_rust/fineweb_edu_sample_10bt_tokenizer.json",
+        default="tokenizer_rust/tokenizer.json",
     )
     return parser.parse_args()
 
