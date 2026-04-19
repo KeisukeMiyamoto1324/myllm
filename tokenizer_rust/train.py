@@ -2,6 +2,8 @@ import argparse
 from collections.abc import Iterator
 from pathlib import Path
 import sys
+from dotenv import load_dotenv
+load_dotenv()
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -17,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     # the dataset size and output path stay explicit.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument("--vocab-size", type=int, default=65536)
+    parser.add_argument("--vocab-size", type=int, default=32768)
     parser.add_argument("--max-samples", type=int, default=200000)
     parser.add_argument("--max-chars", type=int, default=2048)
     parser.add_argument(
