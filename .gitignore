@@ -3,3 +3,4 @@ __pycache__/
 model/
 lightning_logs/
 .env
+tokenizer_rust/**.json
