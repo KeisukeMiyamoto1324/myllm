@@ -4,12 +4,12 @@ from pathlib import Path
 import torch
 
 from device_utils import resolve_device
-from tokenizer import Tokenizer
+from tokenizer_rust.tokenizer import ByteLevelBPE
 from transformer import DecoderOnlyTransformer
 
 
 # prompt = "what is statquest <EOS>"
-prompt = "the book"
+prompt = "Dogs are"
 
 model_dir = Path(__file__).with_name("model")
 model_path = model_dir / "model.pth"
@@ -19,7 +19,7 @@ device = resolve_device()
 # Load the tokenizer and the saved model configuration so
 # inference uses the same architecture as training.
 # ---------------------------------------------------------
-tokenizer = Tokenizer.load(model_dir / "tokenizer.json")
+tokenizer = ByteLevelBPE.load(model_dir / "tokenizer.json")
 
 with open(model_dir / "model_config.json") as f:
     model_config = json.load(f)
@@ -29,7 +29,7 @@ with open(model_dir / "model_config.json") as f:
 # before restoring the trained weights.
 # ---------------------------------------------------------
 model = DecoderOnlyTransformer(
-    num_tokens=len(tokenizer.vocabulary),
+    num_tokens=tokenizer.get_vocab_size(),
     d_model=model_config["d_model"],
     max_len=model_config["max_len"],
     num_layers=model_config["num_layers"],
@@ -48,10 +48,11 @@ model.eval()
 # Encode the prompt and keep the saved sequence length as the
 # upper limit for autoregressive token generation.
 # ---------------------------------------------------------
-model_input = tokenizer.tokenizer(words=prompt).unsqueeze(0).to(device)
+prompt_token_ids = tokenizer.tokenize(sentence=prompt)
+model_input = torch.tensor(prompt_token_ids, dtype=torch.long).unsqueeze(0).to(device)
 input_length = model_input.size(dim=1)
 max_len = model_config["max_len"]
-eos_token_id = tokenizer.tokenizer("<EOS>").item()
+eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
 # ---------------------------------------------------------
 # Generate one token at a time until EOS appears or the saved
@@ -71,5 +72,5 @@ with torch.no_grad():
         predicted_id = torch.argmax(predictions[:, -1, :], dim=-1, keepdim=True)
         predicted_ids = torch.cat((predicted_ids, predicted_id), dim=1)
 
-predicted_tokens = predicted_ids.squeeze(0).detach().cpu()
-print(f"predicted tokens: {tokenizer.detokenizer(tokens=predicted_tokens)}")
+generated_token_ids = predicted_ids.squeeze(0).detach().cpu().tolist()
+print(f"predicted tokens: {tokenizer.detokenize(token_ids=generated_token_ids)}")
