@@ -49,18 +49,39 @@ class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
 
         # ---------------------------------------------------------
         # Tokenize each streamed document into one fixed-length
-        # training example and yield it immediately.
+        # training sequence chunk and yield it immediately.
         # ---------------------------------------------------------
         for sample in dataset:
-            yield self._create_example(text=sample["text"])
+            yield from self._create_examples(text=sample["text"])
 
-    def _create_example(self, text: str) -> tuple[torch.Tensor, torch.Tensor]:
+    def _create_examples(self, text: str) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         # ---------------------------------------------------------
-        # Encode the text once, append EOS, and pad the remainder
-        # so every sample matches the configured sequence length.
+        # Encode the document once and split it into sequential
+        # fixed-length chunks so long texts produce many samples.
         # ---------------------------------------------------------
         token_ids = self.tokenizer.tokenize(sentence=text)
-        input_ids = token_ids[: self.max_len - 1] + [self.eos_token_id]
+
+        # ---------------------------------------------------------
+        # Slice the token stream into chunks that reserve the last
+        # position for EOS inside every yielded training example.
+        # ---------------------------------------------------------
+        chunk_size = self.max_len - 1
+        chunk_starts = range(0, max(len(token_ids), 1), chunk_size)
+
+        # ---------------------------------------------------------
+        # Convert every chunk into one padded input-label pair and
+        # stream it out without buffering the full document.
+        # ---------------------------------------------------------
+        for chunk_start in chunk_starts:
+            chunk_token_ids = token_ids[chunk_start : chunk_start + chunk_size]
+            yield self._build_example(chunk_token_ids=chunk_token_ids)
+
+    def _build_example(self, chunk_token_ids: list[int]) -> tuple[torch.Tensor, torch.Tensor]:
+        # ---------------------------------------------------------
+        # Append EOS to the chunk and pad the remainder so every
+        # sample matches the configured sequence length.
+        # ---------------------------------------------------------
+        input_ids = chunk_token_ids + [self.eos_token_id]
         padding_size = self.max_len - len(input_ids)
         padded_input_ids = input_ids + [self.pad_token_id for _ in range(padding_size)]
 
