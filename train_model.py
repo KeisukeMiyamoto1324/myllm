@@ -10,6 +10,9 @@ from dataset import FineWebEduDataset
 from tokenizer_rust.tokenizer import ByteLevelBPE
 from transformer import DecoderOnlyTransformer
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
@@ -17,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     # model size and streamed optimization budget.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-len", type=int, default=16)
+    parser.add_argument("--max-len", type=int, default=256)
     parser.add_argument("--d-model", type=int, default=64)
     parser.add_argument("--num-layers", type=int, default=4)
     parser.add_argument("--num-heads", type=int, default=4)
