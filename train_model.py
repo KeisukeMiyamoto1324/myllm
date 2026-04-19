@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--max-steps", type=int, default=1000)
-    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--tokenizer-path", type=str, default="model/tokenizer.json")
     return parser.parse_args()
 
