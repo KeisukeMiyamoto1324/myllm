@@ -4,9 +4,9 @@ from pathlib import Path
 
 import torch
 
-from device_utils import resolve_device
+from model.device_utils import resolve_device
 from tokenizer_rust.tokenizer import ByteLevelBPE
-from transformer import DecoderOnlyTransformer
+from model.transformer import DecoderOnlyTransformer
 
 
 def parse_args() -> argparse.Namespace:
@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt", type=str)
-    parser.add_argument("--model-dir", type=str, default="model")
+    parser.add_argument("--model-dir", type=str, default="../model-10m")
     parser.add_argument("--max-new-tokens", type=int, default=64)
     return parser.parse_args()
 
@@ -133,7 +133,7 @@ def main() -> None:
         device=device,
     )
     generated_text = tokenizer.detokenize(token_ids=generated_token_ids)
-    print(f"predicted tokens: {generated_text}")
+    print(f"predicted tokens: \n{generated_text}")
 
 
 if __name__ == "__main__":
