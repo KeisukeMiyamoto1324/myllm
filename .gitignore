@@ -1,6 +1,7 @@
 venv/
 __pycache__/
-model/
 lightning_logs/
 .env
 tokenizer_rust/**.json
+models/
+
