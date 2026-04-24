@@ -5,7 +5,7 @@ import sys
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from tokenizer_rust.tokenizer import ByteLevelBPE
+from src.tokenizer_rust.tokenizer import ByteLevelBPE
 
 
 def parse_args() -> argparse.Namespace:
