@@ -37,6 +37,6 @@ def parse_args(default_model_dir: Path) -> argparse.Namespace:
     parser.add_argument("prompt", type=str)
     parser.add_argument("--model-dir", type=str, default=str(default_model_dir))
     parser.add_argument("--max-new-tokens", type=int, default=64)
-    parser.add_argument("--top-k", type=non_negative_int, default=1)
-    parser.add_argument("--temperature", type=positive_float, default=1.0)
+    parser.add_argument("--top-k", type=non_negative_int, default=32)
+    parser.add_argument("--temperature", type=positive_float, default=0.7)
     return parser.parse_args()
