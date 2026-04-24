@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.model.dataset import FineWebEduDataset
-from src.model.device_utils import resolve_accelerator
+from src.model.device_utils import resolve_accelerator, resolve_precision
 from src.tokenizer_rust.tokenizer import ByteLevelBPE
 from src.model.transformer import DecoderOnlyTransformer
 
@@ -120,6 +120,7 @@ def main() -> None:
     args = parse_args()
     tokenizer = ByteLevelBPE.load(Path(args.tokenizer_path))
     accelerator = resolve_accelerator()
+    precision = resolve_precision(accelerator=accelerator)
 
     # ---------------------------------------------------------
     # Create the output directory and resolve the tokenizer ids
@@ -211,12 +212,13 @@ def main() -> None:
 
     # ---------------------------------------------------------
     # Let Lightning place the model on CUDA or MPS when those
-    # backends are available and run periodic validation checks.
+    # backends are available and choose precision for that backend.
     # ---------------------------------------------------------
     trainer = L.Trainer(
         max_steps=args.max_steps,
         accelerator=accelerator,
         devices=1,
+        precision=precision,
         callbacks=callbacks,
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.val_batches,
