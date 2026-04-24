@@ -23,3 +23,12 @@ def resolve_accelerator() -> str:
     # expected by Lightning's Trainer configuration.
     # ---------------------------------------------------------
     return resolve_device().type
+
+
+def resolve_precision(accelerator: str) -> str:
+    # ---------------------------------------------------------
+    # Use mixed precision on CUDA to reduce activation memory while
+    # keeping other backends on Lightning's default 32-bit behavior.
+    # ---------------------------------------------------------
+    precision_by_accelerator = {"cuda": "bf16-mixed"}
+    return precision_by_accelerator.get(accelerator, "32-true")
