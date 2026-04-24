@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.optim import Adam
 import lightning as L
 
+from src.model.kv_cache import KeyValueCache, LayerKeyValueCache
 from src.model.position_encoding import PositionEncoding
 from src.model.self_attention import Attention
 
@@ -63,6 +64,34 @@ class DecoderBlock(nn.Module):
         feed_forward_input = self.norm_2(attention_residual)
         feed_forward_output = self.feed_forward(feed_forward_input)
         return attention_residual + feed_forward_output
+
+    def forward_with_cache(
+        self,
+        x: torch.Tensor,
+        past_key_value: LayerKeyValueCache | None,
+        mask: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, LayerKeyValueCache]:
+        # ---------------------------------------------------------
+        # Apply self-attention with a layer-local cache, then keep the
+        # feed-forward path identical to the full sequence forward.
+        # ---------------------------------------------------------
+        attention_input = self.norm_1(x)
+        attention_output, key_value_cache = self.attention.forward_with_cache(
+            attention_input,
+            attention_input,
+            attention_input,
+            past_key_value,
+            mask,
+        )
+        attention_residual = x + attention_output
+
+        # ---------------------------------------------------------
+        # Transform only the visible token states because old states
+        # have already been folded into the cached keys and values.
+        # ---------------------------------------------------------
+        feed_forward_input = self.norm_2(attention_residual)
+        feed_forward_output = self.feed_forward(feed_forward_input)
+        return attention_residual + feed_forward_output, key_value_cache
 
 
 class DecoderOnlyTransformer(L.LightningModule):
@@ -130,6 +159,45 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         normalized_hidden_states = self.final_norm(hidden_states)
         return self.fc_layer(normalized_hidden_states)
+
+    def forward_with_cache(
+        self,
+        token_ids: torch.Tensor,
+        past_key_values: KeyValueCache | None,
+    ) -> tuple[torch.Tensor, KeyValueCache]:
+        # ---------------------------------------------------------
+        # Offset positions by the cached sequence length so one-token
+        # inference matches full-sequence absolute positions.
+        # ---------------------------------------------------------
+        position_offset = 0
+
+        if past_key_values is not None:
+            position_offset = past_key_values[0][0].size(dim=2)
+
+        word_embeddings = self.we(token_ids)
+        hidden_states = self.pe(word_embeddings, position_offset=position_offset)
+        mask = self._create_causal_mask(token_ids) if past_key_values is None else None
+        next_key_values: KeyValueCache = []
+
+        # ---------------------------------------------------------
+        # Pass each layer its own cache entry and collect the updated
+        # entries in the same order for the next generation step.
+        # ---------------------------------------------------------
+        for layer_index, block in enumerate(self.blocks):
+            past_key_value = None if past_key_values is None else past_key_values[layer_index]
+            hidden_states, key_value_cache = block.forward_with_cache(
+                hidden_states,
+                past_key_value,
+                mask,
+            )
+            next_key_values.append(key_value_cache)
+
+        # ---------------------------------------------------------
+        # Produce logits only for the currently supplied token slice
+        # while returning cache tensors that include all past tokens.
+        # ---------------------------------------------------------
+        normalized_hidden_states = self.final_norm(hidden_states)
+        return self.fc_layer(normalized_hidden_states), next_key_values
 
     def configure_optimizers(self) -> Adam:
         # ---------------------------------------------------------

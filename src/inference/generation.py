@@ -26,12 +26,23 @@ def generate_token_ids(
     generated_token_ids: list[int] = []
 
     # ---------------------------------------------------------
-    # Predict one token at a time until EOS appears or the
-    # configured generation length limit is reached.
+    # Stop immediately when the prompt already consumes the full
+    # context window configured for the trained model.
+    # ---------------------------------------------------------
+    if max_generation_steps <= 0:
+        return generated_token_ids
+
+    # ---------------------------------------------------------
+    # Run the prompt once to fill the KV cache, then feed only the
+    # latest sampled token on later generation steps.
     # ---------------------------------------------------------
     with torch.no_grad():
-        for _ in range(max_generation_steps):
-            predictions = model(model_input)
+        predictions, key_value_cache = model.forward_with_cache(
+            token_ids=model_input,
+            past_key_values=None,
+        )
+
+        for step_index in range(max_generation_steps):
             predicted_id = sample_next_token_id(
                 logits=predictions[:, -1, :],
                 top_k=top_k,
@@ -43,6 +54,11 @@ def generate_token_ids(
                 break
 
             generated_token_ids.append(predicted_token_id)
-            model_input = torch.cat((model_input, predicted_id), dim=1)
+
+            if step_index + 1 < max_generation_steps:
+                predictions, key_value_cache = model.forward_with_cache(
+                    token_ids=predicted_id,
+                    past_key_values=key_value_cache,
+                )
 
     return generated_token_ids
