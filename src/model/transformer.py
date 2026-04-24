@@ -3,8 +3,8 @@ import torch.nn as nn
 from torch.optim import Adam
 import lightning as L
 
-from position_encoding import PositionEncoding
-from self_attention import Attention
+from src.model.position_encoding import PositionEncoding
+from src.model.self_attention import Attention
 
 
 class FeedForward(nn.Module):
@@ -146,4 +146,18 @@ class DecoderOnlyTransformer(L.LightningModule):
         del batch_idx
         input_tokens, labels = batch
         output = self.forward(input_tokens)
-        return self.loss(output.transpose(1, 2), labels)
+        loss = self.loss(output.transpose(1, 2), labels)
+        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+        return loss
+
+    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Reuse the same autoregressive loss during validation so
+        # checkpoints can monitor held-out next-token accuracy.
+        # ---------------------------------------------------------
+        del batch_idx
+        input_tokens, labels = batch
+        output = self.forward(input_tokens)
+        loss = self.loss(output.transpose(1, 2), labels)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        return loss
