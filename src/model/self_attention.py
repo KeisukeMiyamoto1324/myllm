@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -54,7 +52,7 @@ class Attention(nn.Module):
         encoding_for_q: torch.Tensor,
         encoding_for_k: torch.Tensor,
         encoding_for_v: torch.Tensor,
-        mask: torch.Tensor | None = None,
+        is_causal: bool = False,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
         # Create the projected queries, keys, and values for each
@@ -65,17 +63,15 @@ class Attention(nn.Module):
         v = self._split_heads(self.W_v(encoding_for_v))
 
         # ---------------------------------------------------------
-        # Compute scaled dot-product attention and block future tokens
-        # with the causal mask when one is supplied.
+        # Use PyTorch's fused scaled dot-product attention so large
+        # score and softmax tensors do not need to be materialized.
         # ---------------------------------------------------------
-        sims = torch.matmul(q, k.transpose(-2, -1))
-        scaled_sims = sims / math.sqrt(self.head_dim)
-
-        if mask is not None:
-            scaled_sims = scaled_sims.masked_fill(mask=mask, value=torch.finfo(scaled_sims.dtype).min)
-
-        attention_percents = F.softmax(scaled_sims, dim=-1)
-        attention_scores = torch.matmul(attention_percents, v)
+        attention_scores = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            is_causal=is_causal,
+        )
 
         # ---------------------------------------------------------
         # Merge the attended heads and project the result back into
@@ -90,7 +86,7 @@ class Attention(nn.Module):
         encoding_for_k: torch.Tensor,
         encoding_for_v: torch.Tensor,
         past_key_value: LayerKeyValueCache | None,
-        mask: torch.Tensor | None = None,
+        is_causal: bool = False,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
         # ---------------------------------------------------------
         # Project the current tokens and append previous keys and
@@ -110,16 +106,14 @@ class Attention(nn.Module):
 
         # ---------------------------------------------------------
         # Attend the current query positions over cached and current
-        # keys, preserving the same masking behavior as full forward.
+        # keys with the fused scaled dot-product implementation.
         # ---------------------------------------------------------
-        sims = torch.matmul(q, k.transpose(-2, -1))
-        scaled_sims = sims / math.sqrt(self.head_dim)
-
-        if mask is not None:
-            scaled_sims = scaled_sims.masked_fill(mask=mask, value=torch.finfo(scaled_sims.dtype).min)
-
-        attention_percents = F.softmax(scaled_sims, dim=-1)
-        attention_scores = torch.matmul(attention_percents, v)
+        attention_scores = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            is_causal=is_causal,
+        )
 
         # ---------------------------------------------------------
         # Return both the attention result and the updated cache for
