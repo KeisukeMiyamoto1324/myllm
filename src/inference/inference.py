@@ -9,7 +9,7 @@ import torch
 # Add the project root to the import path so direct script
 # execution can import the project packages consistently.
 # ---------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.model.device_utils import resolve_device
@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt", type=str)
-    parser.add_argument("--model-dir", type=str, default=str(PROJECT_ROOT / "model-10m"))
+    parser.add_argument("--model-dir", type=str, default=str(PROJECT_ROOT / "models" / "model-10m"))
     parser.add_argument("--max-new-tokens", type=int, default=64)
     return parser.parse_args()
 
