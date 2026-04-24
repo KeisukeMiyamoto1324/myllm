@@ -87,6 +87,10 @@ def parse_args() -> argparse.Namespace:
     # --tokenizer-path:
     # File path to the tokenizer JSON artifact. This tokenizer
     # defines the vocabulary and special token ids used in training.
+    #
+    # --output-path:
+    # Directory path used to save the trained model weights,
+    # model configuration, and Lightning checkpoints.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-len", type=int, default=512)
@@ -104,6 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-check-interval", type=int, default=1000)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
     parser.add_argument("--tokenizer-path", type=str, default="model/tokenizer.json")
+    parser.add_argument("--output-path", type=str, default="model")
     return parser.parse_args()
 
 
@@ -120,10 +125,10 @@ def main() -> None:
     # Create the output directory and resolve the tokenizer ids
     # needed to stream fixed-length language modeling samples.
     # ---------------------------------------------------------
-    model_dir = Path(__file__).with_name("model")
-    model_dir.mkdir(exist_ok=True)
+    model_dir = Path(args.output_path)
+    model_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = model_dir / "checkpoints"
-    checkpoint_dir.mkdir(exist_ok=True)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     train_split_indexes = tuple(
         split_index
         for split_index in range(args.val_split_modulo)
