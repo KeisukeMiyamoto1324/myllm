@@ -43,7 +43,7 @@ class DecoderBlock(nn.Module):
         self.norm_2 = nn.LayerNorm(normalized_shape=d_model)
         self.feed_forward = FeedForward(d_model=d_model, d_ff=d_ff)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
         # Apply pre-norm self-attention so multiple decoder blocks can
         # be stacked without changing the external interface.
@@ -53,7 +53,7 @@ class DecoderBlock(nn.Module):
             attention_input,
             attention_input,
             attention_input,
-            mask,
+            is_causal=True,
         )
         attention_residual = x + attention_output
 
@@ -69,7 +69,6 @@ class DecoderBlock(nn.Module):
         self,
         x: torch.Tensor,
         past_key_value: LayerKeyValueCache | None,
-        mask: torch.Tensor | None,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
         # ---------------------------------------------------------
         # Apply self-attention with a layer-local cache, then keep the
@@ -81,7 +80,7 @@ class DecoderBlock(nn.Module):
             attention_input,
             attention_input,
             past_key_value,
-            mask,
+            is_causal=past_key_value is None,
         )
         attention_residual = x + attention_output
 
@@ -128,15 +127,6 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         self.loss = nn.CrossEntropyLoss(ignore_index=pad_token_id)
 
-    def _create_causal_mask(self, token_ids: torch.Tensor) -> torch.Tensor:
-        # ---------------------------------------------------------
-        # Build a mask that hides future tokens for autoregressive
-        # decoding in every decoder block.
-        # ---------------------------------------------------------
-        seq_len = token_ids.size(dim=1)
-        lower_triangular = torch.tril(torch.ones((seq_len, seq_len), device=token_ids.device, dtype=torch.bool))
-        return (~lower_triangular).unsqueeze(0).unsqueeze(0)
-
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
         # Convert token ids into hidden states and apply positional
@@ -144,14 +134,13 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         word_embeddings = self.we(token_ids)
         hidden_states = self.pe(word_embeddings)
-        mask = self._create_causal_mask(token_ids)
 
         # ---------------------------------------------------------
         # Reuse the same decoder block interface for every layer to
         # make the model depth configurable.
         # ---------------------------------------------------------
         for block in self.blocks:
-            hidden_states = block(hidden_states, mask)
+            hidden_states = block(hidden_states)
 
         # ---------------------------------------------------------
         # Normalize the final hidden states and map them into token
@@ -176,7 +165,6 @@ class DecoderOnlyTransformer(L.LightningModule):
 
         word_embeddings = self.we(token_ids)
         hidden_states = self.pe(word_embeddings, position_offset=position_offset)
-        mask = self._create_causal_mask(token_ids) if past_key_values is None else None
         next_key_values: KeyValueCache = []
 
         # ---------------------------------------------------------
@@ -188,7 +176,6 @@ class DecoderOnlyTransformer(L.LightningModule):
             hidden_states, key_value_cache = block.forward_with_cache(
                 hidden_states,
                 past_key_value,
-                mask,
             )
             next_key_values.append(key_value_cache)
 
