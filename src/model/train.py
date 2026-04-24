@@ -1,11 +1,18 @@
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import lightning as L
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
+
+# ---------------------------------------------------------
+# Add the project root so direct script execution can import
+# modules through the src package path.
+# ---------------------------------------------------------
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.model.dataset import FineWebEduDataset
 from src.model.device_utils import resolve_accelerator
