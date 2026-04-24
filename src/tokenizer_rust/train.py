@@ -8,7 +8,11 @@ load_dotenv()
 from datasets import load_dataset
 from tqdm import tqdm
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+# ---------------------------------------------------------
+# Add the project root so direct script execution can import
+# modules through the src package path.
+# ---------------------------------------------------------
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.tokenizer_rust.tokenizer import ByteLevelBPE
 
@@ -25,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-path",
         type=str,
-        default="tokenizer_rust/tokenizer.json",
+        default="models/tokenizer.json",
     )
     return parser.parse_args()
 
