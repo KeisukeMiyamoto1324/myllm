@@ -186,6 +186,7 @@ def main() -> None:
         d_ff=args.d_ff,
         learning_rate=args.learning_rate,
         pad_token_id=pad_token_id,
+        use_fused_optimizer=accelerator == "cuda",
     )
 
     # ---------------------------------------------------------

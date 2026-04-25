@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.optim import Adam
+from torch.optim import AdamW
 import lightning as L
 
 from src.model.kv_cache import KeyValueCache, LayerKeyValueCache
@@ -104,6 +104,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         d_ff: int = 8,
         learning_rate: float = 0.1,
         pad_token_id: int = 0,
+        use_fused_optimizer: bool = False,
     ) -> None:
         super().__init__()
 
@@ -120,6 +121,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)
         self.learning_rate = learning_rate
         self.pad_token_id = pad_token_id
+        self.use_fused_optimizer = use_fused_optimizer
 
         # ---------------------------------------------------------
         # Keep the loss local to the model so Lightning can call the
@@ -186,12 +188,16 @@ class DecoderOnlyTransformer(L.LightningModule):
         normalized_hidden_states = self.final_norm(hidden_states)
         return self.fc_layer(normalized_hidden_states), next_key_values
 
-    def configure_optimizers(self) -> Adam:
+    def configure_optimizers(self) -> AdamW:
         # ---------------------------------------------------------
-        # Use the same optimizer setup as before while keeping the
-        # deeper architecture trainable with one entry point.
+        # Use AdamW for decoupled weight decay and enable the fused
+        # CUDA implementation only when the training script requests it.
         # ---------------------------------------------------------
-        return Adam(self.parameters(), lr=self.learning_rate)
+        return AdamW(
+            self.parameters(),
+            lr=self.learning_rate,
+            fused=self.use_fused_optimizer,
+        )
 
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         # ---------------------------------------------------------
