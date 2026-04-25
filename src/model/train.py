@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.model.dataset import FineWebEduDataset
+from src.model.dataset import FineWebEduDataset, LocalTokenizedDataset, build_tokenized_cache
 from src.model.device_utils import resolve_accelerator, resolve_precision
 from src.tokenizer_rust.tokenizer import ByteLevelBPE
 from src.model.transformer import DecoderOnlyTransformer
@@ -76,6 +76,10 @@ def parse_args() -> argparse.Namespace:
     # Number of validation batches evaluated at each validation run.
     # This caps validation cost so streamed training stays bounded.
     #
+    # --validation-cache-path:
+    # Optional file path for fixed tokenized validation samples.
+    # Empty value stores a cache under the output directory.
+    #
     # --val-check-interval:
     # Training step interval used to trigger validation. Smaller
     # values monitor quality more often, with extra compute cost.
@@ -105,6 +109,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-split-modulo", type=int, default=100)
     parser.add_argument("--val-split-index", type=int, default=0)
     parser.add_argument("--val-batches", type=int, default=64)
+    parser.add_argument("--validation-cache-path", type=str, default="")
     parser.add_argument("--val-check-interval", type=int, default=1000)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
@@ -130,6 +135,15 @@ def main() -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = model_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    validation_sample_count = args.batch_size * args.val_batches
+    default_validation_cache_path = (
+        model_dir
+        / f"validation-cache-len{args.max_len}-samples{validation_sample_count}"
+        f"-split{args.val_split_modulo}-{args.val_split_index}.pt"
+    )
+    validation_cache_path = (
+        Path(args.validation_cache_path) if args.validation_cache_path else default_validation_cache_path
+    )
     train_split_indexes = tuple(
         split_index
         for split_index in range(args.val_split_modulo)
@@ -139,8 +153,8 @@ def main() -> None:
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
     # ---------------------------------------------------------
-    # Stream FineWeb-Edu directly from Hugging Face and split the
-    # stream deterministically into training and validation sets.
+    # Stream FineWeb-Edu for training and use the same split rule
+    # once to build a fixed local validation cache.
     # ---------------------------------------------------------
     train_dataset = FineWebEduDataset(
         tokenizer=tokenizer,
@@ -150,13 +164,31 @@ def main() -> None:
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
     )
-    val_dataset = FineWebEduDataset(
+    validation_source_dataset = FineWebEduDataset(
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
         eos_token_id=eos_token_id,
         split_modulo=args.val_split_modulo,
         split_indexes=(args.val_split_index,),
+    )
+
+    # ---------------------------------------------------------
+    # Materialize validation samples once, then read validation
+    # batches from local tensors during every validation pass.
+    # ---------------------------------------------------------
+    if not validation_cache_path.exists():
+        build_tokenized_cache(
+            dataset=validation_source_dataset,
+            path=validation_cache_path,
+            num_samples=validation_sample_count,
+            max_len=args.max_len,
+        )
+
+    val_dataset = LocalTokenizedDataset(
+        path=validation_cache_path,
+        max_len=args.max_len,
+        num_samples=validation_sample_count,
     )
     train_dataloader = DataLoader(
         train_dataset,
@@ -249,6 +281,8 @@ def main() -> None:
                 "pad_token_id": pad_token_id,
                 "val_split_modulo": args.val_split_modulo,
                 "val_split_index": args.val_split_index,
+                "validation_cache_path": str(validation_cache_path),
+                "validation_sample_count": validation_sample_count,
             },
             f,
         )

@@ -1,7 +1,10 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import torch
 from datasets import load_dataset
+from tqdm import tqdm
+from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
 
@@ -104,3 +107,98 @@ class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
         inputs = torch.tensor(padded_input_ids, dtype=torch.long)
         labels = torch.tensor(label_ids, dtype=torch.long)
         return inputs, labels
+
+
+class LocalTokenizedDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    def __init__(
+        self,
+        path: Path,
+        max_len: int,
+        num_samples: int,
+    ) -> None:
+        super().__init__()
+
+        # ---------------------------------------------------------
+        # Load fixed tokenized samples from local storage so
+        # validation avoids streaming, skipping, and tokenization.
+        # ---------------------------------------------------------
+        payload = torch.load(path, map_location="cpu")
+        self.inputs = payload["inputs"]
+        self.labels = payload["labels"]
+        self.metadata = payload["metadata"]
+
+        # ---------------------------------------------------------
+        # Reject stale caches because validation samples must match
+        # the current model context length exactly.
+        # ---------------------------------------------------------
+        if self.metadata["max_len"] != max_len:
+            raise ValueError("Validation cache max_len does not match the training configuration")
+
+        if self.metadata["num_samples"] != num_samples:
+            raise ValueError("Validation cache sample count does not match the training configuration")
+
+    def __len__(self) -> int:
+        # ---------------------------------------------------------
+        # Return the number of fixed validation examples available
+        # from the cached tensor file.
+        # ---------------------------------------------------------
+        return self.inputs.size(dim=0)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        # ---------------------------------------------------------
+        # Return one cached input-label pair without additional
+        # tokenization or network access.
+        # ---------------------------------------------------------
+        return self.inputs[index], self.labels[index]
+
+
+def build_tokenized_cache(
+    dataset: IterableDataset[tuple[torch.Tensor, torch.Tensor]],
+    path: Path,
+    num_samples: int,
+    max_len: int,
+) -> None:
+    # ---------------------------------------------------------
+    # Materialize a fixed number of examples from the streaming
+    # source once so later validation reads local tensors only.
+    # ---------------------------------------------------------
+    path.parent.mkdir(parents=True, exist_ok=True)
+    inputs: list[torch.Tensor] = []
+    labels: list[torch.Tensor] = []
+
+    # ---------------------------------------------------------
+    # Consume exactly the configured validation budget and stop
+    # before extra remote samples are streamed or tokenized.
+    # ---------------------------------------------------------
+    progress_bar = tqdm(total=num_samples, desc="Building validation cache", unit="sample")
+
+    for input_ids, label_ids in dataset:
+        inputs.append(input_ids)
+        labels.append(label_ids)
+        progress_bar.update(1)
+
+        if len(inputs) == num_samples:
+            break
+
+    progress_bar.close()
+
+    # ---------------------------------------------------------
+    # Fail loudly when the source stream cannot provide the
+    # requested fixed validation budget.
+    # ---------------------------------------------------------
+    if len(inputs) != num_samples:
+        raise ValueError("Validation cache source ended before enough samples were collected")
+
+    # ---------------------------------------------------------
+    # Store tensors with enough metadata to reject incompatible
+    # validation caches on later training runs.
+    # ---------------------------------------------------------
+    payload = {
+        "inputs": torch.stack(inputs),
+        "labels": torch.stack(labels),
+        "metadata": {
+            "num_samples": num_samples,
+            "max_len": max_len,
+        },
+    }
+    torch.save(payload, path)
