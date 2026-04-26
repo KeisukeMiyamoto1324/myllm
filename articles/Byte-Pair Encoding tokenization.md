@@ -174,3 +174,5 @@ Vocabulary = { m, y, ▁, c, a, t, e, r, o, ▁c, ▁ca, ▁a }
 
 なので、token が12個登録されていますが、最終的に大きさが 16 の Vocabulary を作りたいなら、merge を後4回繰り返します。
 
+## Byte-Level BPE とな何か
+
