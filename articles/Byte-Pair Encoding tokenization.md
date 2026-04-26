@@ -1,6 +1,6 @@
 # Byte-Level BPE tokenizer とは何か
 
-この記事では テキストをトークン列に変換する手法である Byte-Level BPE (Byte-Level Byte Pair Encoding) という tokenizer について解説します。
+この記事では テキストをトークン列に変換する手法である Byte Pair Encoding という tokenizer について解説します。
 
 この記事を書くにあたって、まず Hugging Face の LLM Course にある以下の記事を参考にさせていただきました。
 
@@ -9,7 +9,7 @@
 
 ## BPE とは何か
 
-まず、 Byte-Level BPE の前身である BPE (Byte Pair Encoding) について解説します。BPE の考え方を一言でいうと、「よく一緒に出てくる文字のペアを、どんどん一つの token としてまとめていく」というものです。
+BPE の考え方を一言でいうと、「よく一緒に出てくる文字のペアを、どんどん一つの token としてまとめていく」というものです。
 
 仕組みを説明するために以下の用語を定義します。
 
@@ -174,5 +174,4 @@ Vocabulary = { m, y, ▁, c, a, t, e, r, o, ▁c, ▁ca, ▁a }
 
 なので、token が12個登録されていますが、最終的に大きさが 16 の Vocabulary を作りたいなら、merge を後4回繰り返します。
 
-## Byte-Level BPE とな何か
-
+## BPE の弱点
