@@ -3,3 +3,4 @@ lightning
 tqdm
 datasets
 tokenizers
+python-dotenv
