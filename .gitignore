@@ -8,3 +8,4 @@ models/
 model-10m/checkpoints/
 *.ckpt
 *.pth
+docs/
