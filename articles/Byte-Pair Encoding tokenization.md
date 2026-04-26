@@ -1,8 +1,6 @@
-# Byte-Level BPE tokenizer とは何か
+# BPE tokenizer とは何か
 
-この記事では テキストをトークン列に変換する手法である Byte Pair Encoding という tokenizer について解説します。
-
-この記事を書くにあたって、まず Hugging Face の LLM Course にある以下の記事を参考にさせていただきました。
+この記事では テキストをトークン列に変換する手法である Byte Pair Encoding という tokenizer について解説します。この記事を書くにあたって、まず Hugging Face の LLM Course にある以下の記事を参考にさせていただきました。
 
 [Byte-Pair Encoding tokenization](https://huggingface.co/learn/llm-course/chapter6/5) 
 
@@ -175,3 +173,23 @@ Vocabulary = { m, y, ▁, c, a, t, e, r, o, ▁c, ▁ca, ▁a }
 なので、token が12個登録されていますが、最終的に大きさが 16 の Vocabulary を作りたいなら、merge を後4回繰り返します。
 
 ## BPE の弱点
+
+BPE は「よく出てくる token の組み合わせをまとめる」というシンプルな仕組みによって、文字単位よりも効率よく文章を token 化できます。一方で、BPE には未知語をうまく tokenize できないと言う致命的な欠点があります。
+
+BPE は Vocabulary に存在する token を使って文章を分割します。そのため、Vocabulary に含まれていない文字や記号が入力されると、それをうまく token 化できません。例えば、学習データに絵文字が含まれていない tokenizer に以下の文章を入力したとします。
+
+```text
+I like 🍣
+```
+
+このとき、`🍣` を表す token が Vocabulary に存在しない場合、tokenizer はそれを `<unk>` のような special token に置き換える必要があります。
+
+```text
+I like 🍣 -> I, ▁like, ▁, <unk>
+```
+
+しかし `<unk>` に置き換えられると、元の文字が何だったのかという情報は失われます。つまり、tokenize した後の token 列から元の文章を完全には復元できなくなります。これは LLM の性能を下げる原因になります。
+
+## 未知語問題をどう解決するか
+
+この弱点を克服するために使われるのが、Byte-Level BPE です。Byte-Level BPE では、文字そのものではなく byte を最小単位として扱うことで、ほぼすべての文字を special token にせず token 化できます。次回の記事では、この BPE の弱点を克服した Byte-Level BPE について詳しく解説します。
