@@ -138,13 +138,21 @@ my       -> m y
 ▁carrot  -> ▁ca r r o t
 ```
 
-さらに token ペアを数えると、`(▁, a)` が 2 回出現します。
+さらに token ペアを数えます。
 
 ```text
+(m, y) = 1
+(▁ca, t) = 1
 (▁, a) = 2
+(a, t) = 1
+(t, e) = 1
+(▁ca, r) = 1
+(r, r) = 1
+(r, o) = 1
+(o, t) = 1
 ```
 
-そこで `(▁, a)` を merge して、`▁a` という新しい token を作ります。
+ここでは `(▁, a)` の出現回数が最も多いため、`(▁, a)` を merge して、`▁a` という新しい token を作ります。
 
 ```text
 Vocabulary = { m, y, ▁, c, a, t, e, r, o, ▁c, ▁ca, ▁a }
