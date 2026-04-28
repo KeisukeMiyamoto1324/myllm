@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--d-ff", type=int, default=768)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--max-steps", type=int, default=64000)
+    parser.add_argument("--max-steps", type=int, default=25600)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
     parser.add_argument("--val-split-index", type=int, default=0)
@@ -142,7 +142,7 @@ def main() -> None:
     validation_sample_count = args.batch_size * args.val_batches
     default_validation_cache_path = (
         model_dir
-        / f"validation-cache-smollm-cosmopedia-v2-len{args.max_len}-samples{validation_sample_count}"
+        / f"validation-cache-smollm-cosmopedia-v2-bos-eos-len{args.max_len}-samples{validation_sample_count}"
         f"-split{args.val_split_modulo}-{args.val_split_index}.pt"
     )
     validation_cache_path = (
@@ -154,6 +154,7 @@ def main() -> None:
         if split_index != args.val_split_index
     )
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
+    bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
     # ---------------------------------------------------------
@@ -164,6 +165,7 @@ def main() -> None:
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
+        bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
@@ -172,6 +174,7 @@ def main() -> None:
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
+        bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
         split_modulo=args.val_split_modulo,
         split_indexes=(args.val_split_index,),
@@ -283,6 +286,8 @@ def main() -> None:
                 "d_ff": args.d_ff,
                 "learning_rate": args.learning_rate,
                 "pad_token_id": pad_token_id,
+                "bos_token_id": bos_token_id,
+                "eos_token_id": eos_token_id,
                 "dataset_path": SMOLLM_CORPUS_PATH,
                 "dataset_subset": SMOLLM_CORPUS_SUBSET,
                 "val_split_modulo": args.val_split_modulo,

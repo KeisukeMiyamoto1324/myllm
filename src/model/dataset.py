@@ -22,6 +22,7 @@ class SmolLMCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
         tokenizer: ByteLevelBPE,
         max_len: int,
         pad_token_id: int,
+        bos_token_id: int,
         eos_token_id: int,
         split_modulo: int = 1,
         split_indexes: tuple[int, ...] = (0,),
@@ -35,6 +36,7 @@ class SmolLMCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
         self.tokenizer = tokenizer
         self.max_len = max_len
         self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
         self.eos_token_id = eos_token_id
         self.split_modulo = split_modulo
         self.split_indexes = split_indexes
@@ -75,42 +77,46 @@ class SmolLMCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
 
     def _create_examples(self, text: str) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         # ---------------------------------------------------------
-        # Encode the document once and split it into sequential
-        # fixed-length chunks so long texts produce many samples.
+        # Encode the document with BOS at the document start and
+        # EOS at the true document end before chunking.
         # ---------------------------------------------------------
-        token_ids = self.tokenizer.tokenize(sentence=text)
+        document_token_ids = [
+            self.bos_token_id,
+            *self.tokenizer.tokenize(sentence=text),
+            self.eos_token_id,
+        ]
 
         # ---------------------------------------------------------
-        # Slice the token stream into chunks that reserve the last
-        # position for EOS inside every yielded training example.
+        # Slice overlapping windows so the final token in each input
+        # still learns to predict the next document token.
         # ---------------------------------------------------------
-        chunk_size = self.max_len - 1
-        chunk_starts = range(0, max(len(token_ids), 1), chunk_size)
+        chunk_starts = range(0, len(document_token_ids) - 1, self.max_len)
 
         # ---------------------------------------------------------
         # Convert every chunk into one padded input-label pair and
         # stream it out without buffering the full document.
         # ---------------------------------------------------------
         for chunk_start in chunk_starts:
-            chunk_token_ids = token_ids[chunk_start : chunk_start + chunk_size]
-            yield self._build_example(chunk_token_ids=chunk_token_ids)
+            window_token_ids = document_token_ids[chunk_start : chunk_start + self.max_len + 1]
+            yield self._build_example(
+                input_token_ids=window_token_ids[:-1],
+                label_token_ids=window_token_ids[1:],
+            )
 
-    def _build_example(self, chunk_token_ids: list[int]) -> tuple[torch.Tensor, torch.Tensor]:
+    def _build_example(
+        self,
+        input_token_ids: list[int],
+        label_token_ids: list[int],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # ---------------------------------------------------------
-        # Append EOS to the chunk and pad the remainder so every
-        # sample matches the configured sequence length.
+        # Pad the input and label streams separately so every sample
+        # matches the configured sequence length.
         # ---------------------------------------------------------
-        input_ids = chunk_token_ids + [self.eos_token_id]
-        padding_size = self.max_len - len(input_ids)
-        padded_input_ids = input_ids + [self.pad_token_id for _ in range(padding_size)]
-
-        # ---------------------------------------------------------
-        # Shift the padded sequence by one position to build the
-        # next-token labels used by the decoder loss.
-        # ---------------------------------------------------------
-        label_ids = padded_input_ids[1:] + [self.pad_token_id]
+        padding_size = self.max_len - len(input_token_ids)
+        padded_input_ids = input_token_ids + [self.pad_token_id for _ in range(padding_size)]
+        padded_label_ids = label_token_ids + [self.pad_token_id for _ in range(padding_size)]
         inputs = torch.tensor(padded_input_ids, dtype=torch.long)
-        labels = torch.tensor(label_ids, dtype=torch.long)
+        labels = torch.tensor(padded_label_ids, dtype=torch.long)
         return inputs, labels
 
 
