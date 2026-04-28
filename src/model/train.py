@@ -101,11 +101,11 @@ def parse_args() -> argparse.Namespace:
     # model configuration, and Lightning checkpoints.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-len", type=int, default=512)
-    parser.add_argument("--d-model", type=int, default=192)
-    parser.add_argument("--num-layers", type=int, default=12)
-    parser.add_argument("--num-heads", type=int, default=6)
-    parser.add_argument("--d-ff", type=int, default=768)
+    parser.add_argument("--max-len", type=int, default=256)
+    parser.add_argument("--d-model", type=int, default=256)
+    parser.add_argument("--num-layers", type=int, default=16)
+    parser.add_argument("--num-heads", type=int, default=8)
+    parser.add_argument("--d-ff", type=int, default=1024)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--max-steps", type=int, default=25600)
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-check-interval", type=int, default=1000)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
-    parser.add_argument("--output-path", type=str, default="models/model-new")
+    parser.add_argument("--output-path", type=str, default="models/model-10m-v2")
     return parser.parse_args()
 
 
