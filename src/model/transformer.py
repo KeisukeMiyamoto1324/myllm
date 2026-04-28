@@ -36,11 +36,11 @@ class DecoderBlock(nn.Module):
 
         # ---------------------------------------------------------
         # Compose one decoder block from attention, feed-forward, and
-        # normalization layers with residual connections.
+        # RMS normalization layers with residual connections.
         # ---------------------------------------------------------
-        self.norm_1 = nn.LayerNorm(normalized_shape=d_model)
+        self.norm_1 = nn.RMSNorm(normalized_shape=d_model)
         self.attention = Attention(d_model=d_model, num_heads=num_heads)
-        self.norm_2 = nn.LayerNorm(normalized_shape=d_model)
+        self.norm_2 = nn.RMSNorm(normalized_shape=d_model)
         self.feed_forward = FeedForward(d_model=d_model, d_ff=d_ff)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -117,7 +117,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         self.blocks = nn.ModuleList(
             [DecoderBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff) for _ in range(num_layers)]
         )
-        self.final_norm = nn.LayerNorm(normalized_shape=d_model)
+        self.final_norm = nn.RMSNorm(normalized_shape=d_model)
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)
         self.learning_rate = learning_rate
         self.pad_token_id = pad_token_id
