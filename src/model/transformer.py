@@ -119,6 +119,12 @@ class DecoderOnlyTransformer(L.LightningModule):
         )
         self.final_norm = nn.RMSNorm(normalized_shape=d_model)
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)
+
+        # ---------------------------------------------------------
+        # Share token embedding weights with the output projection
+        # so small models spend more parameters inside the blocks.
+        # ---------------------------------------------------------
+        self.fc_layer.weight = self.we.weight
         self.learning_rate = learning_rate
         self.pad_token_id = pad_token_id
         self.use_fused_optimizer = use_fused_optimizer
