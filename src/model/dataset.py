@@ -11,7 +11,12 @@ from torch.utils.data import get_worker_info
 from src.tokenizer_rust.tokenizer import ByteLevelBPE
 
 
-class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
+SMOLLM_CORPUS_PATH = "HuggingFaceTB/smollm-corpus"
+SMOLLM_CORPUS_SUBSET = "cosmopedia-v2"
+SMOLLM_CORPUS_SPLIT = "train"
+
+
+class SmolLMCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(
         self,
         tokenizer: ByteLevelBPE,
@@ -36,13 +41,13 @@ class FineWebEduDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
 
     def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         # ---------------------------------------------------------
-        # Open the FineWeb-Edu training split as a streaming source
-        # so samples are never materialized in local memory.
+        # Open the SmolLM corpus training split as a streaming
+        # source so samples are never materialized in local memory.
         # ---------------------------------------------------------
         dataset = load_dataset(
-            path="HuggingFaceFW/fineweb-edu",
-            name="sample-10BT",
-            split="train",
+            path=SMOLLM_CORPUS_PATH,
+            name=SMOLLM_CORPUS_SUBSET,
+            split=SMOLLM_CORPUS_SPLIT,
             streaming=True,
         )
 

@@ -17,6 +17,11 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from src.tokenizer_rust.tokenizer import ByteLevelBPE
 
 
+SMOLLM_CORPUS_PATH = "HuggingFaceTB/smollm-corpus"
+SMOLLM_CORPUS_SUBSET = "cosmopedia-v2"
+SMOLLM_CORPUS_SPLIT = "train"
+
+
 def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
     # Define CLI arguments for streaming tokenizer training so
@@ -36,13 +41,13 @@ def parse_args() -> argparse.Namespace:
 
 def build_text_iterator(max_samples: int, max_chars: int) -> Iterator[str]:
     # ---------------------------------------------------------
-    # Stream the FineWeb-Edu sample-10BT split and yield only a
-    # bounded number of truncated text samples.
+    # Stream the SmolLM corpus split and yield only a bounded
+    # number of truncated text samples.
     # ---------------------------------------------------------
     dataset = load_dataset(
-        path="HuggingFaceFW/fineweb-edu",
-        name="sample-10BT",
-        split="train",
+        path=SMOLLM_CORPUS_PATH,
+        name=SMOLLM_CORPUS_SUBSET,
+        split=SMOLLM_CORPUS_SPLIT,
         streaming=True,
     )
     progress = tqdm(total=max_samples, desc="CollectSamples")
@@ -71,7 +76,7 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ---------------------------------------------------------
-    # Train the tokenizer from the streamed FineWeb-Edu samples
+    # Train the tokenizer from the streamed SmolLM corpus samples
     # and persist the resulting tokenizer artifact.
     # ---------------------------------------------------------
     tokenizer = ByteLevelBPE(vocab_size=args.vocab_size)

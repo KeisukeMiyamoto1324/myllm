@@ -14,7 +14,11 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.model.dataset import FineWebEduDataset, LocalTokenizedDataset, build_tokenized_cache
+from src.model.dataset import SMOLLM_CORPUS_PATH
+from src.model.dataset import SMOLLM_CORPUS_SUBSET
+from src.model.dataset import LocalTokenizedDataset
+from src.model.dataset import SmolLMCorpusDataset
+from src.model.dataset import build_tokenized_cache
 from src.model.device_utils import resolve_accelerator, resolve_precision
 from src.tokenizer_rust.tokenizer import ByteLevelBPE
 from src.model.transformer import DecoderOnlyTransformer
@@ -138,7 +142,7 @@ def main() -> None:
     validation_sample_count = args.batch_size * args.val_batches
     default_validation_cache_path = (
         model_dir
-        / f"validation-cache-len{args.max_len}-samples{validation_sample_count}"
+        / f"validation-cache-smollm-cosmopedia-v2-len{args.max_len}-samples{validation_sample_count}"
         f"-split{args.val_split_modulo}-{args.val_split_index}.pt"
     )
     validation_cache_path = (
@@ -153,10 +157,10 @@ def main() -> None:
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
     # ---------------------------------------------------------
-    # Stream FineWeb-Edu for training and use the same split rule
-    # once to build a fixed local validation cache.
+    # Stream SmolLM corpus for training and use the same split
+    # rule once to build a fixed local validation cache.
     # ---------------------------------------------------------
-    train_dataset = FineWebEduDataset(
+    train_dataset = SmolLMCorpusDataset(
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
@@ -164,7 +168,7 @@ def main() -> None:
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
     )
-    validation_source_dataset = FineWebEduDataset(
+    validation_source_dataset = SmolLMCorpusDataset(
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
@@ -279,6 +283,8 @@ def main() -> None:
                 "d_ff": args.d_ff,
                 "learning_rate": args.learning_rate,
                 "pad_token_id": pad_token_id,
+                "dataset_path": SMOLLM_CORPUS_PATH,
+                "dataset_subset": SMOLLM_CORPUS_SUBSET,
                 "val_split_modulo": args.val_split_modulo,
                 "val_split_index": args.val_split_index,
                 "validation_cache_path": str(validation_cache_path),
