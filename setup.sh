@@ -1,9 +1,16 @@
+#!/usr/bin/env bash
+set -e
+
 sudo apt update
-sudo apt install python3.10-venv -y
-python3 -m venv venv
+sudo apt install software-properties-common -y
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.12 python3.12-venv python3.12-dev -y
+
+python3.12 -m venv venv
 source venv/bin/activate
-pip3 install --upgrade pip
-pip3 install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
 git config --local user.name "KeisukeMiyamoto1324"
 git config --local user.email "aichiboyhighschool@gmail.com"
