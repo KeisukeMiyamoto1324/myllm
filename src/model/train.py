@@ -102,10 +102,10 @@ def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-len", type=int, default=256)
-    parser.add_argument("--d-model", type=int, default=256)
-    parser.add_argument("--num-layers", type=int, default=16)
-    parser.add_argument("--num-heads", type=int, default=8)
-    parser.add_argument("--d-ff", type=int, default=1024)
+    parser.add_argument("--d-model", type=int, default=640)
+    parser.add_argument("--num-layers", type=int, default=18)
+    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--d-ff", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--max-steps", type=int, default=25600)
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-check-interval", type=int, default=1000)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
-    parser.add_argument("--output-path", type=str, default="models/model-10m-v2")
+    parser.add_argument("--output-path", type=str, default="models/model-10m-v3")
     return parser.parse_args()
 
 
