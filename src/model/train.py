@@ -120,7 +120,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-batches", type=int, default=64)
     parser.add_argument("--validation-cache-path", type=str, default="")
     parser.add_argument("--val-check-interval", type=int, default=1000)
-    parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
+    parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
     parser.add_argument("--output-path", type=str, default="models/model-100m-v3")
