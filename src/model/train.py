@@ -6,6 +6,7 @@ import sys
 import lightning as L
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
 # ---------------------------------------------------------
@@ -92,6 +93,10 @@ def parse_args() -> argparse.Namespace:
     # Step interval for saving periodic checkpoints. These files
     # allow training to resume or preserve intermediate states.
     #
+    # --metric-log-every-n-steps:
+    # Step interval for writing logged metrics to CSV. Larger values
+    # reduce disk writes and keep training throughput stable.
+    #
     # --tokenizer-path:
     # File path to the tokenizer JSON artifact. This tokenizer
     # defines the vocabulary and special token ids used in training.
@@ -116,6 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-cache-path", type=str, default="")
     parser.add_argument("--val-check-interval", type=int, default=1000)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
+    parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
     parser.add_argument("--output-path", type=str, default="models/model-100m-v3")
     return parser.parse_args()
@@ -251,6 +257,17 @@ def main() -> None:
     ]
 
     # ---------------------------------------------------------
+    # Store train and validation metrics as CSV with batched writes
+    # so loss history can be inspected without slowing training.
+    # ---------------------------------------------------------
+    metrics_logger = CSVLogger(
+        save_dir=model_dir,
+        name="metrics",
+        version="",
+        flush_logs_every_n_steps=args.metric_log_every_n_steps,
+    )
+
+    # ---------------------------------------------------------
     # Let Lightning place the model on CUDA or MPS when those
     # backends are available and choose precision for that backend.
     # ---------------------------------------------------------
@@ -260,6 +277,8 @@ def main() -> None:
         devices=1,
         precision=precision,
         callbacks=callbacks,
+        logger=metrics_logger,
+        log_every_n_steps=args.metric_log_every_n_steps,
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.val_batches,
         num_sanity_val_steps=0,
