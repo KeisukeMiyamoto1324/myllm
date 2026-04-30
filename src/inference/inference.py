@@ -20,7 +20,7 @@ def main() -> None:
     # Parse the CLI arguments and resolve the saved model files
     # used to run inference with the trained artifacts.
     # ---------------------------------------------------------
-    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-10m")
+    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-100m-v3")
     model_dir = Path(args.model_dir)
     model_path = model_dir / "model.pth"
     tokenizer_path = model_dir / "tokenizer.json"
