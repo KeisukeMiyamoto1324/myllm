@@ -1,7 +1,7 @@
 import torch
 
-from src.inference.sampling import sample_next_token_id
-from src.inference_chat.chat_template import build_chat_prompt_token_ids
+from src.inference_base.sampling import sample_next_token_id
+from src.inference_it.chat_template import build_chat_prompt_token_ids
 from src.posttraining.chat_template import ChatMessage
 from src.pretraining.transformer import DecoderOnlyTransformer
 from src.tokenizer.tokenizer import ByteLevelBPE

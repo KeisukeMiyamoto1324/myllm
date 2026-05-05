@@ -1,8 +1,8 @@
 import argparse
 from pathlib import Path
 
-from src.inference.cli import non_negative_int
-from src.inference.cli import positive_float
+from src.inference_base.cli import non_negative_int
+from src.inference_base.cli import positive_float
 
 
 def parse_args(default_model_dir: Path) -> argparse.Namespace:
