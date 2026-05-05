@@ -16,10 +16,19 @@ def generate_token_ids(
     temperature: float,
 ) -> list[int]:
     # ---------------------------------------------------------
-    # Encode the prompt into token ids and move the initial
-    # sequence onto the target device for autoregressive use.
+    # Encode the prompt with BOS so inference matches the document
+    # boundary format used during training.
     # ---------------------------------------------------------
-    prompt_token_ids = tokenizer.tokenize(sentence=prompt)
+    bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
+    prompt_token_ids = [
+        bos_token_id,
+        *tokenizer.tokenize(sentence=prompt),
+    ]
+
+    # ---------------------------------------------------------
+    # Move the initial sequence onto the target device for
+    # autoregressive generation.
+    # ---------------------------------------------------------
     model_input = torch.tensor(prompt_token_ids, dtype=torch.long).unsqueeze(0).to(device)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
     max_generation_steps = min(max_new_tokens, max_len - len(prompt_token_ids))
