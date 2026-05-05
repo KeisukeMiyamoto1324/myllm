@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from hashlib import blake2b
 from pathlib import Path
 
 import torch
@@ -62,18 +63,34 @@ class SmolLMCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
             dataset = dataset.shard(num_shards=worker_info.num_workers, index=worker_info.id)
 
         # ---------------------------------------------------------
-        # Route each streamed document into the configured split so
-        # training and validation consume disjoint samples.
+        # Route each streamed document into the configured split by
+        # stable content hash instead of worker-local stream index.
         # ---------------------------------------------------------
-        for sample_index, sample in enumerate(dataset):
-            if sample_index % self.split_modulo not in self.split_indexes:
-                continue
+        dataset = dataset.filter(self._contains_split_index)
 
+        for sample in dataset:
             # ---------------------------------------------------------
             # Tokenize each streamed document into fixed-length
             # training sequence chunks and yield them immediately.
             # ---------------------------------------------------------
             yield from self._create_examples(text=sample["text"])
+
+    def _contains_split_index(self, sample: dict[str, str]) -> bool:
+        # ---------------------------------------------------------
+        # Use a deterministic document-content hash so split
+        # membership is independent of DataLoader worker sharding.
+        # ---------------------------------------------------------
+        split_index = self._resolve_split_index(text=sample["text"])
+        return split_index in self.split_indexes
+
+    def _resolve_split_index(self, text: str) -> int:
+        # ---------------------------------------------------------
+        # Convert document text into a stable integer partition id
+        # without relying on process-randomized Python hashing.
+        # ---------------------------------------------------------
+        encoded_text = text.encode("utf-8")
+        digest = blake2b(encoded_text, digest_size=8).digest()
+        return int.from_bytes(digest, byteorder="big") % self.split_modulo
 
     def _create_examples(self, text: str) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         # ---------------------------------------------------------

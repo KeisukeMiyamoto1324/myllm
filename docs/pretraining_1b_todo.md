@@ -17,7 +17,7 @@
   - TODO: buffer shuffle、または tokenized shard 化による shard/sample シャッフルを導入する。
   - 完了条件: train stream が固定順序ではなく、seed 管理された再現可能なシャッフルで供給される。
 
-- [ ] train/validation split を worker 数に依存しない安定分割にする
+- [x] train/validation split を worker 数に依存しない安定分割にする
   - 対象: `src/pretraining/dataset.py`
   - 現状: DataLoader worker で shard した後に `enumerate()` して modulo split しているため、worker ごとの local index によって validation 文書が train 側に混ざる可能性がある。
   - TODO: 文書 ID、安定 hash、または shard 前の global index に基づく split に変更する。
