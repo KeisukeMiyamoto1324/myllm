@@ -17,8 +17,8 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.inference.model_loader import build_model
-from src.inference.model_loader import load_model_config
+from src.inference_base.model_loader import build_model
+from src.inference_base.model_loader import load_model_config
 from src.posttraining.dataset import EVERYDAY_DATASET_PATH
 from src.posttraining.dataset import EVERYDAY_TRAIN_SPLIT
 from src.posttraining.dataset import EVERYDAY_VALIDATION_SPLIT

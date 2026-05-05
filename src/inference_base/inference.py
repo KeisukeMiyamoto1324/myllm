@@ -8,9 +8,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.inference.cli import parse_args
-from src.inference.generation import generate_token_ids
-from src.inference.model_loader import build_model, load_model_config
+from src.inference_base.cli import parse_args
+from src.inference_base.generation import generate_token_ids
+from src.inference_base.model_loader import build_model, load_model_config
 from src.pretraining.device_utils import resolve_device
 from src.tokenizer.tokenizer import ByteLevelBPE
 
