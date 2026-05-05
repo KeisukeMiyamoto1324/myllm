@@ -25,6 +25,8 @@ class ByteLevelBPE:
     system_token: str = "|<system>|"
     user_token: str = "|<user>|"
     assistant_token: str = "|<assistant>|"
+    thinking_token: str = "|<thinking>|"
+    end_of_thinking_token: str = "|<end_of_thinking>|"
     end_of_turn_token: str = "|<end_of_turn>|"
     extra_special_tokens: list[str] = field(default_factory=list)
     tokenizer: Tokenizer = field(init=False)
@@ -46,6 +48,8 @@ class ByteLevelBPE:
             self.system_token,
             self.user_token,
             self.assistant_token,
+            self.thinking_token,
+            self.end_of_thinking_token,
             self.end_of_turn_token,
             *self.extra_special_tokens,
         ]
