@@ -1,8 +1,8 @@
 import torch
 
 from src.inference.sampling import sample_next_token_id
-from src.model.transformer import DecoderOnlyTransformer
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
+from src.pretraining.transformer import DecoderOnlyTransformer
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 def generate_token_ids(

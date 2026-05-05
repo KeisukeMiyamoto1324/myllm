@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
 
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 SMOLLM_CORPUS_PATH = "HuggingFaceTB/smollm-corpus"

@@ -3,9 +3,13 @@ import json
 from pathlib import Path
 import sys
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+# ---------------------------------------------------------
+# Add the project root so direct script execution can import
+# modules through the src package path.
+# ---------------------------------------------------------
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tokenizer-path",
         type=str,
-        default="tokenizer_rust/tokenizer.json",
+        default="models/tokenizer.json",
     )
     return parser.parse_args()
 

@@ -22,6 +22,10 @@ class ByteLevelBPE:
     sep_token: str = "|<sep>|"
     cls_token: str = "|<cls>|"
     mask_token: str = "|<mask>|"
+    system_token: str = "|<system>|"
+    user_token: str = "|<user>|"
+    assistant_token: str = "|<assistant>|"
+    end_of_turn_token: str = "|<end_of_turn>|"
     extra_special_tokens: list[str] = field(default_factory=list)
     tokenizer: Tokenizer = field(init=False)
     special_tokens: list[str] = field(default_factory=list, init=False)
@@ -39,6 +43,10 @@ class ByteLevelBPE:
             self.sep_token,
             self.cls_token,
             self.mask_token,
+            self.system_token,
+            self.user_token,
+            self.assistant_token,
+            self.end_of_turn_token,
             *self.extra_special_tokens,
         ]
         self.tokenizer = Tokenizer(BPE(unk_token=self.unknown_token))
