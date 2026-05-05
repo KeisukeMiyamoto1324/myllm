@@ -148,7 +148,7 @@ def main() -> None:
     validation_sample_count = args.batch_size * args.val_batches
     default_validation_cache_path = (
         model_dir
-        / f"validation-cache-smollm-cosmopedia-v2-bos-eos-len{args.max_len}-samples{validation_sample_count}"
+        / f"validation-cache-smollm-cosmopedia-v2-bos-eos-text-hash-len{args.max_len}-samples{validation_sample_count}"
         f"-split{args.val_split_modulo}-{args.val_split_index}.pt"
     )
     validation_cache_path = (
