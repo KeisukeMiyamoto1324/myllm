@@ -3,8 +3,8 @@ from pathlib import Path
 
 import torch
 
-from src.model.transformer import DecoderOnlyTransformer
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
+from src.pretraining.transformer import DecoderOnlyTransformer
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 def load_model_config(model_dir: Path) -> dict[str, int | float]:

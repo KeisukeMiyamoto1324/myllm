@@ -15,14 +15,14 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.model.dataset import SMOLLM_CORPUS_PATH
-from src.model.dataset import SMOLLM_CORPUS_SUBSET
-from src.model.dataset import LocalTokenizedDataset
-from src.model.dataset import SmolLMCorpusDataset
-from src.model.dataset import build_tokenized_cache
-from src.model.device_utils import resolve_accelerator, resolve_precision
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
-from src.model.transformer import DecoderOnlyTransformer
+from src.pretraining.dataset import SMOLLM_CORPUS_PATH
+from src.pretraining.dataset import SMOLLM_CORPUS_SUBSET
+from src.pretraining.dataset import LocalTokenizedDataset
+from src.pretraining.dataset import SmolLMCorpusDataset
+from src.pretraining.dataset import build_tokenized_cache
+from src.pretraining.device_utils import resolve_accelerator, resolve_precision
+from src.tokenizer.tokenizer import ByteLevelBPE
+from src.pretraining.transformer import DecoderOnlyTransformer
 
 from dotenv import load_dotenv
 load_dotenv()

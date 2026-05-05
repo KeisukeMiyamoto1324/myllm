@@ -14,7 +14,7 @@ from tqdm import tqdm
 # ---------------------------------------------------------
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 SMOLLM_CORPUS_PATH = "HuggingFaceTB/smollm-corpus"

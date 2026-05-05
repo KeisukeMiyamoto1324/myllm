@@ -3,9 +3,9 @@ import torch.nn as nn
 from torch.optim import AdamW
 import lightning as L
 
-from src.model.kv_cache import KeyValueCache, LayerKeyValueCache
-from src.model.position_encoding import PositionEncoding
-from src.model.self_attention import Attention
+from src.pretraining.kv_cache import KeyValueCache, LayerKeyValueCache
+from src.pretraining.position_encoding import PositionEncoding
+from src.pretraining.self_attention import Attention
 
 
 class FeedForward(nn.Module):

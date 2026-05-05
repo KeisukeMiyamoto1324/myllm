@@ -11,8 +11,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.inference.cli import parse_args
 from src.inference.generation import generate_token_ids
 from src.inference.model_loader import build_model, load_model_config
-from src.model.device_utils import resolve_device
-from src.tokenizer_rust.tokenizer import ByteLevelBPE
+from src.pretraining.device_utils import resolve_device
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 def main() -> None:
