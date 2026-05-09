@@ -97,6 +97,10 @@ def parse_args() -> argparse.Namespace:
     # Step interval for writing logged metrics to CSV. Larger values
     # reduce disk writes and keep training throughput stable.
     #
+    # --loss-chunk-size:
+    # Number of sequence positions projected to vocabulary logits at
+    # once when computing loss for large vocabulary training.
+    #
     # --tokenizer-path:
     # File path to the tokenizer JSON artifact. This tokenizer
     # defines the vocabulary and special token ids used in training.
@@ -107,12 +111,12 @@ def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-len", type=int, default=512)
-    parser.add_argument("--d-model", type=int, default=640)
-    parser.add_argument("--num-layers", type=int, default=16)
-    parser.add_argument("--num-heads", type=int, default=8)
-    parser.add_argument("--d-ff", type=int, default=2560)
+    parser.add_argument("--d-model", type=int, default=1152)
+    parser.add_argument("--num-layers", type=int, default=26)
+    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--d-ff", type=int, default=6912)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=42)
     parser.add_argument("--max-steps", type=int, default=102400)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
@@ -122,8 +126,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-check-interval", type=int, default=5000)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
+    parser.add_argument("--loss-chunk-size", type=int, default=32)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
-    parser.add_argument("--output-path", type=str, default="models/model-100m-v3")
+    parser.add_argument("--output-path", type=str, default="models/model-1b-v1")
     return parser.parse_args()
 
 
@@ -232,6 +237,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         pad_token_id=pad_token_id,
         use_fused_optimizer=accelerator == "cuda",
+        loss_chunk_size=args.loss_chunk_size,
     )
 
     # ---------------------------------------------------------
@@ -304,6 +310,7 @@ def main() -> None:
                 "num_heads": args.num_heads,
                 "d_ff": args.d_ff,
                 "learning_rate": args.learning_rate,
+                "loss_chunk_size": args.loss_chunk_size,
                 "pad_token_id": pad_token_id,
                 "bos_token_id": bos_token_id,
                 "eos_token_id": eos_token_id,
