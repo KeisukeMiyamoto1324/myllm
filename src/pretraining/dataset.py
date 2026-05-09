@@ -178,18 +178,7 @@ class MixedPretrainingDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]
         # mixer can consume each source according to token targets.
         # ---------------------------------------------------------
         corpus_iterators = [
-            iter(
-                PretrainingCorpusDataset(
-                    corpus_case=corpus_case,
-                    tokenizer=self.tokenizer,
-                    max_len=self.max_len,
-                    pad_token_id=self.pad_token_id,
-                    bos_token_id=self.bos_token_id,
-                    eos_token_id=self.eos_token_id,
-                    split_modulo=self.split_modulo,
-                    split_indexes=self.split_indexes,
-                )
-            )
+            self._build_corpus_iterator(corpus_case=corpus_case)
             for corpus_case in self.corpus_cases
         ]
 
@@ -202,12 +191,40 @@ class MixedPretrainingDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]
                 consumed_tokens = 0
 
                 while consumed_tokens < token_target:
-                    input_ids, label_ids = next(corpus_iterators[corpus_index])
+                    try:
+                        input_ids, label_ids = next(corpus_iterators[corpus_index])
+                    except StopIteration:
+                        corpus_iterators[corpus_index] = self._build_corpus_iterator(
+                            corpus_case=self.corpus_cases[corpus_index],
+                        )
+                        input_ids, label_ids = next(corpus_iterators[corpus_index])
+
                     consumed_tokens += count_label_tokens(
                         label_ids=label_ids,
                         pad_token_id=self.pad_token_id,
                     )
                     yield input_ids, label_ids
+
+    def _build_corpus_iterator(
+        self,
+        corpus_case: PretrainingCorpusCase,
+    ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        # ---------------------------------------------------------
+        # Open a fresh stream for one corpus with the same split and
+        # tokenization settings used by the mixed training stream.
+        # ---------------------------------------------------------
+        return iter(
+            PretrainingCorpusDataset(
+                corpus_case=corpus_case,
+                tokenizer=self.tokenizer,
+                max_len=self.max_len,
+                pad_token_id=self.pad_token_id,
+                bos_token_id=self.bos_token_id,
+                eos_token_id=self.eos_token_id,
+                split_modulo=self.split_modulo,
+                split_indexes=self.split_indexes,
+            )
+        )
 
 
 class LocalTokenizedDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
