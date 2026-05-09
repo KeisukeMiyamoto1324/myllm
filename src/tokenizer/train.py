@@ -28,9 +28,9 @@ def parse_args() -> argparse.Namespace:
     # the dataset size and output path stay explicit.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument("--vocab-size", type=int, default=262208)
-    parser.add_argument("--max-samples", type=int, default=200000)
-    parser.add_argument("--max-chars", type=int, default=2048)
+    parser.add_argument("--vocab-size", type=int, default=65536)
+    parser.add_argument("--max-samples", type=int, default=2560000)
+    parser.add_argument("--max-chars", type=int, default=4096)
     parser.add_argument(
         "--output-path",
         type=str,
