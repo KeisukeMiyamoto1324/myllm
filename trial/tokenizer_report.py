@@ -20,13 +20,13 @@ def build_vocab_table(tokenizers: list[tuple[str, PreTrainedTokenizerBase]]) -> 
     return table
 
 
-def build_compression_table(results: list[CompressionResult]) -> Table:
+def build_compression_table(benchmark_name: str, results: list[CompressionResult]) -> Table:
     # ---------------------------------------------------------
-    # Build a readable table for language compression metrics.
+    # Build a readable table for one benchmark compression
+    # metric group.
     # ---------------------------------------------------------
-    table = Table(title="Tokenizer Compression Benchmark", box=box.SIMPLE)
+    table = Table(title=f"Tokenizer Compression Benchmark: {benchmark_name}", box=box.SIMPLE)
     table.add_column("model", no_wrap=True)
-    table.add_column("benchmark", no_wrap=True)
     table.add_column("genre", no_wrap=True)
     table.add_column("lang")
     table.add_column("chars", justify="right")
@@ -38,7 +38,6 @@ def build_compression_table(results: list[CompressionResult]) -> Table:
     for result in results:
         table.add_row(
             result.model_name,
-            result.benchmark_name,
             result.genre,
             result.language,
             str(result.char_count),
@@ -51,6 +50,19 @@ def build_compression_table(results: list[CompressionResult]) -> Table:
     return table
 
 
+def group_results_by_benchmark(results: list[CompressionResult]) -> dict[str, list[CompressionResult]]:
+    # ---------------------------------------------------------
+    # Group compression results by benchmark while preserving
+    # the original benchmark order from the result list.
+    # ---------------------------------------------------------
+    grouped_results: dict[str, list[CompressionResult]] = {}
+
+    for result in results:
+        grouped_results.setdefault(result.benchmark_name, []).append(result)
+
+    return grouped_results
+
+
 def print_report(tokenizers: list[tuple[str, PreTrainedTokenizerBase]], results: list[CompressionResult]) -> None:
     # ---------------------------------------------------------
     # Print the tokenizer summary and compression comparison
@@ -58,4 +70,6 @@ def print_report(tokenizers: list[tuple[str, PreTrainedTokenizerBase]], results:
     # ---------------------------------------------------------
     console = Console(width=140)
     console.print(build_vocab_table(tokenizers))
-    console.print(build_compression_table(results))
+
+    for benchmark_name, benchmark_results in group_results_by_benchmark(results).items():
+        console.print(build_compression_table(benchmark_name, benchmark_results))
