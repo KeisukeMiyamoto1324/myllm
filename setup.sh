@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-set -e
+touch ~/.no_auto_tmux
 
 sudo apt update
 sudo apt install software-properties-common -y
