@@ -1,5 +1,6 @@
 from rich import box
 from rich.console import Console
+from rich.rule import Rule
 from rich.table import Table
 from transformers import PreTrainedTokenizerBase
 
@@ -10,7 +11,7 @@ def build_vocab_table(tokenizers: list[tuple[str, PreTrainedTokenizerBase]]) -> 
     # ---------------------------------------------------------
     # Build a compact table for tokenizer vocabulary sizes.
     # ---------------------------------------------------------
-    table = Table(title="Tokenizer Vocabulary Size", box=box.SIMPLE)
+    table = Table(box=box.SIMPLE)
     table.add_column("model", no_wrap=True)
     table.add_column("vocab_size", justify="right")
 
@@ -20,14 +21,12 @@ def build_vocab_table(tokenizers: list[tuple[str, PreTrainedTokenizerBase]]) -> 
     return table
 
 
-def build_compression_table(benchmark_name: str, results: list[CompressionResult]) -> Table:
+def build_compression_table(results: list[CompressionResult]) -> Table:
     # ---------------------------------------------------------
     # Build a readable table for one benchmark compression
-    # metric group with shared metadata in the title.
+    # metric group.
     # ---------------------------------------------------------
-    benchmark_result = results[0]
-    title = f"{benchmark_name} ({benchmark_result.genre}, chars={benchmark_result.char_count}, bytes={benchmark_result.byte_count})"
-    table = Table(title=title, box=box.SIMPLE)
+    table = Table(box=box.SIMPLE)
     table.add_column("model", no_wrap=True)
     table.add_column("tokens", justify="right")
     table.add_column("chars/token", justify="right")
@@ -42,6 +41,19 @@ def build_compression_table(benchmark_name: str, results: list[CompressionResult
         )
 
     return table
+
+
+def build_benchmark_title(benchmark_name: str, results: list[CompressionResult]) -> str:
+    # ---------------------------------------------------------
+    # Build a compact separator title from benchmark metadata
+    # shared across all tokenizer rows in the same group.
+    # ---------------------------------------------------------
+    result = results[0]
+
+    return (
+        f"{benchmark_name} | {result.genre} | {result.language} | "
+        f"chars={result.char_count} | bytes={result.byte_count}"
+    )
 
 
 def group_results_by_benchmark(results: list[CompressionResult]) -> dict[str, list[CompressionResult]]:
@@ -60,10 +72,13 @@ def group_results_by_benchmark(results: list[CompressionResult]) -> dict[str, li
 def print_report(tokenizers: list[tuple[str, PreTrainedTokenizerBase]], results: list[CompressionResult]) -> None:
     # ---------------------------------------------------------
     # Print the tokenizer summary and compression comparison
-    # with a fixed console width to avoid truncated columns.
+    # with compact separators between each table.
     # ---------------------------------------------------------
-    console = Console(width=140)
+    console = Console()
+    console.print(Rule("Tokenizer Vocabulary Size", style="dim"))
     console.print(build_vocab_table(tokenizers))
 
     for benchmark_name, benchmark_results in group_results_by_benchmark(results).items():
-        console.print(build_compression_table(benchmark_name, benchmark_results))
+        console.print()
+        console.print(Rule(build_benchmark_title(benchmark_name, benchmark_results), style="dim"))
+        console.print(build_compression_table(benchmark_results))
