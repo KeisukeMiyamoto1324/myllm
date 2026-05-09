@@ -23,14 +23,12 @@ def build_vocab_table(tokenizers: list[tuple[str, PreTrainedTokenizerBase]]) -> 
 def build_compression_table(benchmark_name: str, results: list[CompressionResult]) -> Table:
     # ---------------------------------------------------------
     # Build a readable table for one benchmark compression
-    # metric group.
+    # metric group with shared metadata in the title.
     # ---------------------------------------------------------
-    table = Table(title=f"Tokenizer Compression Benchmark: {benchmark_name}", box=box.SIMPLE)
+    benchmark_result = results[0]
+    title = f"{benchmark_name} ({benchmark_result.genre}, chars={benchmark_result.char_count}, bytes={benchmark_result.byte_count})"
+    table = Table(title=title, box=box.SIMPLE)
     table.add_column("model", no_wrap=True)
-    table.add_column("genre", no_wrap=True)
-    table.add_column("lang")
-    table.add_column("chars", justify="right")
-    table.add_column("bytes", justify="right")
     table.add_column("tokens", justify="right")
     table.add_column("chars/token", justify="right")
     table.add_column("bytes/token", justify="right")
@@ -38,10 +36,6 @@ def build_compression_table(benchmark_name: str, results: list[CompressionResult
     for result in results:
         table.add_row(
             result.model_name,
-            result.genre,
-            result.language,
-            str(result.char_count),
-            str(result.byte_count),
             str(result.token_count),
             f"{result.chars_per_token:.4f}",
             f"{result.bytes_per_token:.4f}",
