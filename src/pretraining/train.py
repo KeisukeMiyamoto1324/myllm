@@ -114,6 +114,14 @@ def parse_args() -> argparse.Namespace:
     # --output-path:
     # Directory path used to save the trained model weights,
     # model configuration, and Lightning checkpoints.
+    #
+    # --resume-from-checkpoint:
+    # Lightning checkpoint path used to resume interrupted training
+    # with optimizer state, callback state, and global step.
+    #
+    # --continue-from-model:
+    # Trained model.pth path used to initialize weights for a new
+    # training run without restoring optimizer state.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-len", type=int, default=512)
@@ -136,7 +144,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mix-cycle-tokens", type=int, default=100000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/model-350m-v1")
-    return parser.parse_args()
+
+    resume_group = parser.add_mutually_exclusive_group()
+    resume_group.add_argument("--resume-from-checkpoint", type=str, default="")
+    resume_group.add_argument("--continue-from-model", type=str, default="")
+
+    args = parser.parse_args()
+
+    # ---------------------------------------------------------
+    # Reject missing resume inputs before streaming datasets or
+    # model artifacts are opened for the training run.
+    # ---------------------------------------------------------
+    if args.resume_from_checkpoint and not Path(args.resume_from_checkpoint).is_file():
+        parser.error("--resume-from-checkpoint must point to an existing checkpoint file")
+
+    if args.continue_from_model and not Path(args.continue_from_model).is_file():
+        parser.error("--continue-from-model must point to an existing model state file")
+
+    return args
 
 
 def build_corpus_signature(
@@ -280,6 +305,18 @@ def main() -> None:
     )
 
     # ---------------------------------------------------------
+    # Initialize a fresh training run from saved model weights
+    # when continuing after a completed training job.
+    # ---------------------------------------------------------
+    if args.continue_from_model:
+        model_state = torch.load(
+            Path(args.continue_from_model),
+            map_location="cpu",
+            weights_only=True,
+        )
+        model.load_state_dict(model_state)
+
+    # ---------------------------------------------------------
     # Save both periodic checkpoints and the best validation model
     # so training progress can be resumed or selected later.
     # ---------------------------------------------------------
@@ -328,10 +365,21 @@ def main() -> None:
         limit_val_batches=args.val_batches,
         num_sanity_val_steps=0,
     )
+
+    # ---------------------------------------------------------
+    # Pass the checkpoint path to Lightning so interrupted runs
+    # restore optimizer state, callbacks, and global step.
+    # ---------------------------------------------------------
+    checkpoint_path = None
+
+    if args.resume_from_checkpoint:
+        checkpoint_path = args.resume_from_checkpoint
+
     trainer.fit(
         model,
         train_dataloaders=train_dataloader,
         val_dataloaders=val_dataloader,
+        ckpt_path=checkpoint_path,
     )
 
     # ---------------------------------------------------------
@@ -360,6 +408,7 @@ def main() -> None:
                 "val_split_index": args.val_split_index,
                 "validation_cache_path": str(validation_cache_path),
                 "validation_sample_count": validation_sample_count,
+                "trained_steps": trainer.global_step,
             },
             f,
         )
