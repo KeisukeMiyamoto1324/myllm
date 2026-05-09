@@ -24,8 +24,10 @@ def build_compression_table(results: list[CompressionResult]) -> Table:
     # ---------------------------------------------------------
     # Build a readable table for language compression metrics.
     # ---------------------------------------------------------
-    table = Table(title="Wikipedia Tokenizer Compression", box=box.SIMPLE)
+    table = Table(title="Tokenizer Compression Benchmark", box=box.SIMPLE)
     table.add_column("model", no_wrap=True)
+    table.add_column("benchmark", no_wrap=True)
+    table.add_column("genre", no_wrap=True)
     table.add_column("lang")
     table.add_column("chars", justify="right")
     table.add_column("bytes", justify="right")
@@ -36,6 +38,8 @@ def build_compression_table(results: list[CompressionResult]) -> Table:
     for result in results:
         table.add_row(
             result.model_name,
+            result.benchmark_name,
+            result.genre,
             result.language,
             str(result.char_count),
             str(result.byte_count),

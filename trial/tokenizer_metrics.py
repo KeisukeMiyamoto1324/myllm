@@ -1,14 +1,17 @@
 from dataclasses import dataclass
 
+from tokenizer_benchmark_cases import BenchmarkCase
 from transformers import PreTrainedTokenizerBase
 
 
 @dataclass
 class CompressionResult:
     model_name: str
+    benchmark_name: str
+    genre: str
     language: str
     vocab_size: int
-    article_count: int
+    sample_count: int
     char_count: int
     byte_count: int
     token_count: int
@@ -18,7 +21,7 @@ class CompressionResult:
 
 def measure_compression(
     model_name: str,
-    language: str,
+    benchmark_case: BenchmarkCase,
     tokenizer: PreTrainedTokenizerBase,
     texts: list[str],
 ) -> CompressionResult:
@@ -36,9 +39,11 @@ def measure_compression(
     # ---------------------------------------------------------
     return CompressionResult(
         model_name=model_name,
-        language=language,
+        benchmark_name=benchmark_case.name,
+        genre=benchmark_case.genre,
+        language=benchmark_case.language,
         vocab_size=tokenizer.vocab_size,
-        article_count=len(texts),
+        sample_count=len(texts),
         char_count=char_count,
         byte_count=byte_count,
         token_count=token_count,
