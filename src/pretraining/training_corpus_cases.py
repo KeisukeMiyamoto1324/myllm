@@ -16,14 +16,24 @@ class PretrainingCorpusCase:
 
 PRETRAINING_CORPUS_CASES = [
     PretrainingCorpusCase(
-        name="smollm-cosmopedia-v2",
+        name="fineweb-en",
         genre="web",
         language="en",
-        dataset_path="HuggingFaceTB/smollm-corpus",
-        config_name="cosmopedia-v2",
+        dataset_path="HuggingFaceFW/fineweb",
+        config_name="sample-10BT",
         split="train",
         text_column="text",
-        token_percentage=100.0,
+        token_percentage=30.0,
+    ),
+    PretrainingCorpusCase(
+        name="fineweb2-ja",
+        genre="web",
+        language="ja",
+        dataset_path="HuggingFaceFW/fineweb-2",
+        config_name="jpn_Jpan",
+        split="train",
+        text_column="text",
+        token_percentage=70.0,
     ),
 ]
 
