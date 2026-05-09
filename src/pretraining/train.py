@@ -1,4 +1,5 @@
 import argparse
+from hashlib import blake2b
 import json
 from pathlib import Path
 import sys
@@ -15,12 +16,13 @@ from torch.utils.data import DataLoader
 # ---------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.pretraining.dataset import SMOLLM_CORPUS_PATH
-from src.pretraining.dataset import SMOLLM_CORPUS_SUBSET
 from src.pretraining.dataset import LocalTokenizedDataset
-from src.pretraining.dataset import SmolLMCorpusDataset
+from src.pretraining.dataset import MixedPretrainingDataset
 from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.device_utils import resolve_accelerator, resolve_precision
+from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
+from src.pretraining.training_corpus_cases import PretrainingCorpusCase
+from src.pretraining.training_corpus_cases import serialize_pretraining_corpus_cases
 from src.tokenizer.tokenizer import ByteLevelBPE
 from src.pretraining.transformer import DecoderOnlyTransformer
 
@@ -101,6 +103,10 @@ def parse_args() -> argparse.Namespace:
     # Number of sequence positions projected to vocabulary logits at
     # once when computing loss for large vocabulary training.
     #
+    # --mix-cycle-tokens:
+    # Number of real label tokens used as one corpus mixing cycle.
+    # Larger cycles keep the configured percentages more exact.
+    #
     # --tokenizer-path:
     # Directory path to the tokenizer artifact. This tokenizer
     # defines the vocabulary and special token ids used in training.
@@ -127,9 +133,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--loss-chunk-size", type=int, default=32)
+    parser.add_argument("--mix-cycle-tokens", type=int, default=100000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/model-350m-v1")
     return parser.parse_args()
+
+
+def build_corpus_signature(
+    corpus_cases: list[PretrainingCorpusCase],
+    mix_cycle_tokens: int,
+) -> str:
+    # ---------------------------------------------------------
+    # Hash the corpus mixture into a short stable cache key so
+    # validation files change when datasets or percentages change.
+    # ---------------------------------------------------------
+    payload = {
+        "corpus_cases": serialize_pretraining_corpus_cases(corpus_cases),
+        "mix_cycle_tokens": mix_cycle_tokens,
+    }
+    encoded_payload = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return blake2b(encoded_payload, digest_size=8).hexdigest()
 
 
 def main() -> None:
@@ -151,9 +174,13 @@ def main() -> None:
     checkpoint_dir = model_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     validation_sample_count = args.batch_size * args.val_batches
+    corpus_signature = build_corpus_signature(
+        corpus_cases=PRETRAINING_CORPUS_CASES,
+        mix_cycle_tokens=args.mix_cycle_tokens,
+    )
     default_validation_cache_path = (
         model_dir
-        / f"validation-cache-smollm-cosmopedia-v2-bos-eos-text-hash-len{args.max_len}-samples{validation_sample_count}"
+        / f"validation-cache-{corpus_signature}-bos-eos-text-hash-len{args.max_len}-samples{validation_sample_count}"
         f"-split{args.val_split_modulo}-{args.val_split_index}.pt"
     )
     validation_cache_path = (
@@ -169,24 +196,28 @@ def main() -> None:
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
 
     # ---------------------------------------------------------
-    # Stream SmolLM corpus for training and use the same split
-    # rule once to build a fixed local validation cache.
+    # Stream the configured corpus mixture for training and use
+    # the same split rule to build a fixed validation cache.
     # ---------------------------------------------------------
-    train_dataset = SmolLMCorpusDataset(
+    train_dataset = MixedPretrainingDataset(
+        corpus_cases=PRETRAINING_CORPUS_CASES,
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
+        mix_cycle_tokens=args.mix_cycle_tokens,
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
     )
-    validation_source_dataset = SmolLMCorpusDataset(
+    validation_source_dataset = MixedPretrainingDataset(
+        corpus_cases=PRETRAINING_CORPUS_CASES,
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
+        mix_cycle_tokens=args.mix_cycle_tokens,
         split_modulo=args.val_split_modulo,
         split_indexes=(args.val_split_index,),
     )
@@ -195,18 +226,26 @@ def main() -> None:
     # Materialize validation samples once, then read validation
     # batches from local tensors during every validation pass.
     # ---------------------------------------------------------
+    validation_cache_metadata = {
+        "corpus_signature": corpus_signature,
+        "corpus_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
+        "mix_cycle_tokens": args.mix_cycle_tokens,
+    }
+
     if not validation_cache_path.exists():
         build_tokenized_cache(
             dataset=validation_source_dataset,
             path=validation_cache_path,
             num_samples=validation_sample_count,
             max_len=args.max_len,
+            metadata=validation_cache_metadata,
         )
 
     val_dataset = LocalTokenizedDataset(
         path=validation_cache_path,
         max_len=args.max_len,
         num_samples=validation_sample_count,
+        metadata=validation_cache_metadata,
     )
     train_dataloader = DataLoader(
         train_dataset,
@@ -314,8 +353,9 @@ def main() -> None:
                 "pad_token_id": pad_token_id,
                 "bos_token_id": bos_token_id,
                 "eos_token_id": eos_token_id,
-                "dataset_path": SMOLLM_CORPUS_PATH,
-                "dataset_subset": SMOLLM_CORPUS_SUBSET,
+                "corpus_signature": corpus_signature,
+                "dataset_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
+                "mix_cycle_tokens": args.mix_cycle_tokens,
                 "val_split_modulo": args.val_split_modulo,
                 "val_split_index": args.val_split_index,
                 "validation_cache_path": str(validation_cache_path),
