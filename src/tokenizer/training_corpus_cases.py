@@ -16,14 +16,25 @@ class TrainingCorpusCase:
 
 TRAINING_CORPUS_CASES = [
     TrainingCorpusCase(
-        name="smollm-cosmopedia-v2",
-        genre="synthetic-textbook",
+        name="fineweb-en",
+        genre="web",
         language="en",
-        dataset_path="HuggingFaceTB/smollm-corpus",
-        config_name="cosmopedia-v2",
+        dataset_path="HuggingFaceFW/fineweb",
+        config_name="sample-10BT",
         split="train",
         text_column="text",
-        sample_count=2560000,
+        sample_count=128000,
+        max_chars=4096,
+    ),
+    TrainingCorpusCase(
+        name="fineweb-ja",
+        genre="web",
+        language="ja",
+        dataset_path="HuggingFaceFW/fineweb-2",
+        config_name="jpn_Jpan",
+        split="train",
+        text_column="text",
+        sample_count=128000,
         max_chars=4096,
     ),
 ]
