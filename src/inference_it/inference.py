@@ -37,7 +37,7 @@ def main() -> None:
     # ---------------------------------------------------------
     args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "chat-model")
     model_dir = Path(args.model_dir)
-    tokenizer = ByteLevelBPE.load(model_dir / "tokenizer.json")
+    tokenizer = ByteLevelBPE.load(model_dir)
     model_config = load_model_config(model_dir=model_dir)
     device = resolve_device()
     model = build_model(

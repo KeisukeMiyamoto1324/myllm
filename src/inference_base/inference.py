@@ -23,14 +23,13 @@ def main() -> None:
     args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-100m-v3")
     model_dir = Path(args.model_dir)
     model_path = model_dir / "model.pth"
-    tokenizer_path = model_dir / "tokenizer.json"
     device = resolve_device()
 
     # ---------------------------------------------------------
     # Load the tokenizer and model configuration before the
     # model weights are reconstructed on the active device.
     # ---------------------------------------------------------
-    tokenizer = ByteLevelBPE.load(tokenizer_path)
+    tokenizer = ByteLevelBPE.load(model_dir)
     model_config = load_model_config(model_dir=model_dir)
     model = build_model(
         tokenizer=tokenizer,

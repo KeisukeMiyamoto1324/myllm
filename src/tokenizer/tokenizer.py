@@ -182,17 +182,28 @@ class ByteLevelBPE:
             encoding="utf-8",
         )
 
+    @staticmethod
+    def resolve_tokenizer_file(path: str | Path) -> Path:
+        # ---------------------------------------------------------
+        # Resolve either a Hugging Face tokenizer directory or a
+        # direct tokenizer JSON path into the serialized JSON file.
+        # ---------------------------------------------------------
+        tokenizer_path = Path(path)
+        return tokenizer_path / "tokenizer.json" if tokenizer_path.is_dir() else tokenizer_path
+
     @classmethod
     def load(cls, path: str | Path) -> "ByteLevelBPE":
         # ---------------------------------------------------------
         # Restore the saved tokenizer and keep the wrapper fields
         # aligned with the serialized special token settings.
         # ---------------------------------------------------------
-        with open(path) as f:
+        tokenizer_path = cls.resolve_tokenizer_file(path)
+
+        with open(tokenizer_path) as f:
             data = json.load(f)
 
         tokenizer = cls()
-        tokenizer.tokenizer = Tokenizer.from_file(str(path))
+        tokenizer.tokenizer = Tokenizer.from_file(str(tokenizer_path))
 
         # ---------------------------------------------------------
         # Recover the configured special tokens from the saved

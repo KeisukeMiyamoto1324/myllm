@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tokenizer-path",
         type=str,
-        default="models/tokenizer.json",
+        default="models/tokenizer",
     )
     return parser.parse_args()
 
@@ -38,7 +38,7 @@ def format_token(token: str) -> str:
 def main() -> None:
     # ---------------------------------------------------------
     # Parse the CLI input and load the trained tokenizer from
-    # the configured JSON artifact path.
+    # the configured tokenizer artifact path.
     # ---------------------------------------------------------
     args = parse_args()
     tokenizer = ByteLevelBPE.load(path=Path(args.tokenizer_path))

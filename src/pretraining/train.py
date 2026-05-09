@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     # once when computing loss for large vocabulary training.
     #
     # --tokenizer-path:
-    # File path to the tokenizer JSON artifact. This tokenizer
+    # Directory path to the tokenizer artifact. This tokenizer
     # defines the vocabulary and special token ids used in training.
     #
     # --output-path:
@@ -127,7 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--loss-chunk-size", type=int, default=32)
-    parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer.json")
+    parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/model-1b-v1")
     return parser.parse_args()
 
@@ -323,6 +323,12 @@ def main() -> None:
             },
             f,
         )
+
+    # ---------------------------------------------------------
+    # Save the tokenizer beside the model so the model directory
+    # can be loaded directly by AutoTokenizer.from_pretrained.
+    # ---------------------------------------------------------
+    tokenizer.save_pretrained(path=model_dir)
 
 
 if __name__ == "__main__":

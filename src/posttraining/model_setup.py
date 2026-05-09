@@ -1,5 +1,4 @@
 from pathlib import Path
-import shutil
 
 from src.inference_base.model_loader import build_model
 from src.inference_base.model_loader import load_model_config
@@ -10,13 +9,12 @@ from src.tokenizer.tokenizer import ByteLevelBPE
 
 def build_tokenizer(base_model_dir: Path, output_path: Path) -> ByteLevelBPE:
     # ---------------------------------------------------------
-    # Load the base tokenizer and copy it beside the chat model
-    # artifacts so inference can resolve a self-contained model.
+    # Load the base tokenizer and save it beside the chat model
+    # artifacts as a Hugging Face tokenizer directory.
     # ---------------------------------------------------------
-    tokenizer_path = base_model_dir / "tokenizer.json"
-    output_tokenizer_path = output_path / "tokenizer.json"
-    shutil.copyfile(tokenizer_path, output_tokenizer_path)
-    return ByteLevelBPE.load(output_tokenizer_path)
+    tokenizer = ByteLevelBPE.load(base_model_dir)
+    tokenizer.save_pretrained(output_path)
+    return tokenizer
 
 
 def load_base_model(
