@@ -105,6 +105,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         learning_rate: float = 0.1,
         pad_token_id: int = 0,
         use_fused_optimizer: bool = False,
+        loss_chunk_size: int = 32,
     ) -> None:
         super().__init__()
 
@@ -128,14 +129,15 @@ class DecoderOnlyTransformer(L.LightningModule):
         self.learning_rate = learning_rate
         self.pad_token_id = pad_token_id
         self.use_fused_optimizer = use_fused_optimizer
+        self.loss_chunk_size = loss_chunk_size
 
         # ---------------------------------------------------------
-        # Keep the loss local to the model so Lightning can call the
-        # training step without extra setup.
+        # Keep summed token loss local so large vocabulary logits
+        # can be reduced chunk by chunk during training.
         # ---------------------------------------------------------
-        self.loss = nn.CrossEntropyLoss(ignore_index=pad_token_id)
+        self.loss = nn.CrossEntropyLoss(ignore_index=pad_token_id, reduction="sum")
 
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward_hidden(self, token_ids: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
         # Convert token ids into hidden states and apply positional
         # information before the decoder stack.
@@ -154,8 +156,15 @@ class DecoderOnlyTransformer(L.LightningModule):
         # Normalize the final hidden states and map them into token
         # logits for next-token prediction.
         # ---------------------------------------------------------
-        normalized_hidden_states = self.final_norm(hidden_states)
-        return self.fc_layer(normalized_hidden_states)
+        return self.final_norm(hidden_states)
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Keep the public forward path returning full vocabulary
+        # logits for inference and compatibility with callers.
+        # ---------------------------------------------------------
+        hidden_states = self.forward_hidden(token_ids)
+        return self.fc_layer(hidden_states)
 
     def forward_with_cache(
         self,
@@ -205,6 +214,32 @@ class DecoderOnlyTransformer(L.LightningModule):
             fused=self.use_fused_optimizer,
         )
 
+    def compute_chunked_loss(self, input_tokens: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Run the Transformer stack once, then split only the large
+        # vocabulary projection and cross-entropy over token positions.
+        # ---------------------------------------------------------
+        hidden_states = self.forward_hidden(input_tokens)
+        seq_len = hidden_states.size(dim=1)
+        chunk_starts = range(0, seq_len, self.loss_chunk_size)
+
+        # ---------------------------------------------------------
+        # Accumulate summed token losses so padding can be ignored
+        # with the same weighting as a single full cross-entropy call.
+        # ---------------------------------------------------------
+        loss_chunks = [
+            self.loss(
+                self.fc_layer(
+                    hidden_states[:, chunk_start : chunk_start + self.loss_chunk_size, :]
+                ).transpose(1, 2),
+                labels[:, chunk_start : chunk_start + self.loss_chunk_size],
+            )
+            for chunk_start in chunk_starts
+        ]
+        total_loss = torch.stack(loss_chunks).sum()
+        valid_token_count = labels.ne(self.pad_token_id).sum()
+        return total_loss / valid_token_count
+
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         # ---------------------------------------------------------
         # Run the forward pass and compute token-level cross-entropy
@@ -212,8 +247,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         del batch_idx
         input_tokens, labels = batch
-        output = self.forward(input_tokens)
-        loss = self.loss(output.transpose(1, 2), labels)
+        loss = self.compute_chunked_loss(input_tokens=input_tokens, labels=labels)
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False)
         return loss
 
@@ -224,7 +258,6 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         del batch_idx
         input_tokens, labels = batch
-        output = self.forward(input_tokens)
-        loss = self.loss(output.transpose(1, 2), labels)
+        loss = self.compute_chunked_loss(input_tokens=input_tokens, labels=labels)
         self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         return loss
