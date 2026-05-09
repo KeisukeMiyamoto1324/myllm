@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-path",
         type=str,
-        default="models/tokenizer.json",
+        default="models/tokenizer",
     )
     return parser.parse_args()
 
@@ -68,20 +68,19 @@ def build_text_iterator(max_samples: int, max_chars: int) -> Iterator[str]:
 
 def main() -> None:
     # ---------------------------------------------------------
-    # Parse the arguments and prepare the output path for the
-    # Rust-backed ByteLevel BPE training run.
+    # Parse the arguments and resolve the output directory for
+    # the Hugging Face compatible tokenizer artifact.
     # ---------------------------------------------------------
     args = parse_args()
     output_path = Path(args.output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ---------------------------------------------------------
     # Train the tokenizer from the streamed SmolLM corpus samples
-    # and persist the resulting tokenizer artifact.
+    # and persist it for AutoTokenizer.from_pretrained loading.
     # ---------------------------------------------------------
     tokenizer = ByteLevelBPE(vocab_size=args.vocab_size)
     tokenizer.train(sentences=build_text_iterator(args.max_samples, args.max_chars))
-    tokenizer.save(path=output_path)
+    tokenizer.save_pretrained(path=output_path)
 
 
 if __name__ == "__main__":

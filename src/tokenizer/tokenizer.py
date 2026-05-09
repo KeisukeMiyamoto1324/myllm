@@ -10,6 +10,7 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import ByteLevel
 from tokenizers.processors import ByteLevel as ByteLevelProcessor
 from tokenizers.trainers import BpeTrainer
+from transformers import PreTrainedTokenizerFast
 
 
 @dataclass
@@ -109,12 +110,77 @@ class ByteLevelBPE:
         # ---------------------------------------------------------
         return self.tokenizer.get_vocab_size()
 
+    def named_special_tokens(self) -> dict[str, str]:
+        # ---------------------------------------------------------
+        # Build the standard special token mapping expected by
+        # Hugging Face tokenizer configuration files.
+        # ---------------------------------------------------------
+        return {
+            "pad_token": self.pad_token,
+            "unk_token": self.unknown_token,
+            "bos_token": self.bos_token,
+            "eos_token": self.eos_token,
+            "sep_token": self.sep_token,
+            "cls_token": self.cls_token,
+            "mask_token": self.mask_token,
+        }
+
+    def extra_special_token_list(self) -> list[str]:
+        # ---------------------------------------------------------
+        # Keep chat and reasoning control tokens separate from the
+        # standard Hugging Face special token names.
+        # ---------------------------------------------------------
+        return [
+            self.system_token,
+            self.user_token,
+            self.assistant_token,
+            self.thinking_token,
+            self.end_of_thinking_token,
+            self.end_of_turn_token,
+            *self.extra_special_tokens,
+        ]
+
+    def to_pretrained_tokenizer(self) -> PreTrainedTokenizerFast:
+        # ---------------------------------------------------------
+        # Wrap the Rust tokenizer with the Transformers interface
+        # so it can be saved for AutoTokenizer.from_pretrained.
+        # ---------------------------------------------------------
+        return PreTrainedTokenizerFast(
+            tokenizer_object=self.tokenizer,
+            **self.named_special_tokens(),
+            extra_special_tokens=self.extra_special_token_list(),
+        )
+
     def save(self, path: str | Path) -> None:
         # ---------------------------------------------------------
         # Save the tokenizer as a single JSON artifact that can
         # be restored without rebuilding the trainer settings.
         # ---------------------------------------------------------
         self.tokenizer.save(str(path))
+
+    def save_pretrained(self, path: str | Path) -> None:
+        # ---------------------------------------------------------
+        # Save the tokenizer as a Hugging Face directory artifact
+        # that AutoTokenizer.from_pretrained can load directly.
+        # ---------------------------------------------------------
+        output_path = Path(path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        pretrained_tokenizer = self.to_pretrained_tokenizer()
+        pretrained_tokenizer.save_pretrained(str(output_path))
+
+        # ---------------------------------------------------------
+        # Write the legacy special token map explicitly so older
+        # and newer Transformers loaders get the same metadata.
+        # ---------------------------------------------------------
+        special_tokens_map = {
+            **self.named_special_tokens(),
+            "extra_special_tokens": self.extra_special_token_list(),
+        }
+        special_tokens_map_path = output_path / "special_tokens_map.json"
+        special_tokens_map_path.write_text(
+            json.dumps(special_tokens_map, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
     @classmethod
     def load(cls, path: str | Path) -> "ByteLevelBPE":
