@@ -53,18 +53,24 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
         )
 
         # ---------------------------------------------------------
-        # Shard the stream per worker so parallel data loading
-        # does not duplicate the same records.
+        # Partition documents per worker with the same stable hash
+        # used for train-validation splitting.
         # ---------------------------------------------------------
         worker_info = get_worker_info()
-        if worker_info is not None:
-            dataset = dataset.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+        worker_modulo = worker_info.num_workers if worker_info is not None else 1
+        worker_index = worker_info.id if worker_info is not None else 0
 
         # ---------------------------------------------------------
-        # Route each streamed document into the configured split by
-        # stable content hash instead of worker-local stream index.
+        # Route each streamed document into both the configured
+        # dataset split and the current DataLoader worker partition.
         # ---------------------------------------------------------
-        dataset = dataset.filter(self._contains_split_index)
+        dataset = dataset.filter(
+            lambda sample: self._contains_partition(
+                sample=sample,
+                worker_modulo=worker_modulo,
+                worker_index=worker_index,
+            )
+        )
 
         for sample in dataset:
             # ---------------------------------------------------------
@@ -73,22 +79,31 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
             # ---------------------------------------------------------
             yield from self._create_examples(text=sample[self.corpus_case.text_column])
 
-    def _contains_split_index(self, sample: dict[str, str]) -> bool:
+    def _contains_partition(
+        self,
+        sample: dict[str, str],
+        worker_modulo: int,
+        worker_index: int,
+    ) -> bool:
         # ---------------------------------------------------------
-        # Use a deterministic document-content hash so split
-        # membership is independent of DataLoader worker sharding.
+        # Use one deterministic document-content hash so split and
+        # worker membership stay independent of remote file shards.
         # ---------------------------------------------------------
-        split_index = self._resolve_split_index(text=sample["text"])
-        return split_index in self.split_indexes
+        document_index = self._resolve_document_index(
+            text=sample[self.corpus_case.text_column],
+        )
+        split_index = document_index % self.split_modulo
+        partition_index = (document_index // self.split_modulo) % worker_modulo
+        return split_index in self.split_indexes and partition_index == worker_index
 
-    def _resolve_split_index(self, text: str) -> int:
+    def _resolve_document_index(self, text: str) -> int:
         # ---------------------------------------------------------
-        # Convert document text into a stable integer partition id
-        # without relying on process-randomized Python hashing.
+        # Convert document text into a stable integer id without
+        # relying on process-randomized Python hashing.
         # ---------------------------------------------------------
         encoded_text = text.encode("utf-8")
         digest = blake2b(encoded_text, digest_size=8).digest()
-        return int.from_bytes(digest, byteorder="big") % self.split_modulo
+        return int.from_bytes(digest, byteorder="big")
 
     def _create_examples(self, text: str) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         # ---------------------------------------------------------
@@ -191,19 +206,43 @@ class MixedPretrainingDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]
                 consumed_tokens = 0
 
                 while consumed_tokens < token_target:
-                    try:
-                        input_ids, label_ids = next(corpus_iterators[corpus_index])
-                    except StopIteration:
-                        corpus_iterators[corpus_index] = self._build_corpus_iterator(
-                            corpus_case=self.corpus_cases[corpus_index],
-                        )
-                        input_ids, label_ids = next(corpus_iterators[corpus_index])
-
+                    input_ids, label_ids = self._next_corpus_example(
+                        corpus_iterators=corpus_iterators,
+                        corpus_index=corpus_index,
+                    )
                     consumed_tokens += count_label_tokens(
                         label_ids=label_ids,
                         pad_token_id=self.pad_token_id,
                     )
                     yield input_ids, label_ids
+
+    def _next_corpus_example(
+        self,
+        corpus_iterators: list[Iterator[tuple[torch.Tensor, torch.Tensor]]],
+        corpus_index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # ---------------------------------------------------------
+        # Read the next example and reopen finite streams at cycle
+        # boundaries so long training runs can continue.
+        # ---------------------------------------------------------
+        try:
+            return next(corpus_iterators[corpus_index])
+        except StopIteration:
+            corpus_iterators[corpus_index] = self._build_corpus_iterator(
+                corpus_case=self.corpus_cases[corpus_index],
+            )
+
+        # ---------------------------------------------------------
+        # Raise a clear configuration/data split error when a corpus
+        # partition has no examples after filtering.
+        # ---------------------------------------------------------
+        try:
+            return next(corpus_iterators[corpus_index])
+        except StopIteration as exc:
+            corpus_name = self.corpus_cases[corpus_index].name
+            raise ValueError(
+                f"Corpus stream has no samples after split filtering: {corpus_name}"
+            ) from exc
 
     def _build_corpus_iterator(
         self,
