@@ -1,12 +1,9 @@
 from transformers import AutoTokenizer
 
-from tokenizer_data import load_wikipedia_texts
+from tokenizer_benchmark_cases import BENCHMARK_CASES
+from tokenizer_data import load_benchmark_texts
 from tokenizer_metrics import measure_compression
 from tokenizer_report import print_report
-
-
-WIKIPEDIA_ARTICLE_COUNT = 100
-WIKIPEDIA_MAX_CHARS = 1024
 
 
 def main() -> None:
@@ -31,21 +28,22 @@ def main() -> None:
     ]
 
     # ---------------------------------------------------------
-    # Load the English and Japanese Wikipedia article samples
-    # used by every tokenizer in the comparison.
+    # Load every configured benchmark sample set once so all
+    # tokenizers are measured against identical input text.
     # ---------------------------------------------------------
-    texts_en = load_wikipedia_texts("20231101.en", WIKIPEDIA_ARTICLE_COUNT, WIKIPEDIA_MAX_CHARS)
-    texts_ja = load_wikipedia_texts("20231101.ja", WIKIPEDIA_ARTICLE_COUNT, WIKIPEDIA_MAX_CHARS)
+    benchmark_texts = [
+        (benchmark_case, load_benchmark_texts(benchmark_case))
+        for benchmark_case in BENCHMARK_CASES
+    ]
 
     # ---------------------------------------------------------
-    # Measure compression for every tokenizer and language pair.
+    # Measure compression for every tokenizer and benchmark
+    # case pair.
     # ---------------------------------------------------------
     results = [
-        measure_compression(model_name, "en", tokenizer, texts_en)
+        measure_compression(model_name, benchmark_case, tokenizer, texts)
         for model_name, tokenizer in tokenizers
-    ] + [
-        measure_compression(model_name, "ja", tokenizer, texts_ja)
-        for model_name, tokenizer in tokenizers
+        for benchmark_case, texts in benchmark_texts
     ]
 
     # ---------------------------------------------------------
