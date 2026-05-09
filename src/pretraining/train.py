@@ -116,7 +116,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-heads", type=int, default=4)
     parser.add_argument("--d-ff", type=int, default=6912)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=42)
     parser.add_argument("--max-steps", type=int, default=102400)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
