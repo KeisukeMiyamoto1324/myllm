@@ -1,12 +1,8 @@
 import argparse
-from collections.abc import Iterator
 from pathlib import Path
 import sys
 from dotenv import load_dotenv
 load_dotenv()
-
-from datasets import load_dataset
-from tqdm import tqdm
 
 # ---------------------------------------------------------
 # Add the project root so direct script execution can import
@@ -15,55 +11,23 @@ from tqdm import tqdm
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from src.tokenizer.tokenizer import ByteLevelBPE
-
-
-SMOLLM_CORPUS_PATH = "HuggingFaceTB/smollm-corpus"
-SMOLLM_CORPUS_SUBSET = "cosmopedia-v2"
-SMOLLM_CORPUS_SPLIT = "train"
+from src.tokenizer.training_corpus_cases import TRAINING_CORPUS_CASES
+from src.tokenizer.training_corpus_data import stream_training_texts
 
 
 def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
-    # Define CLI arguments for streaming tokenizer training so
-    # the dataset size and output path stay explicit.
+    # Define CLI arguments for tokenizer training settings that
+    # are not tied to a specific corpus source.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--vocab-size", type=int, default=65536)
-    parser.add_argument("--max-samples", type=int, default=2560000)
-    parser.add_argument("--max-chars", type=int, default=4096)
     parser.add_argument(
         "--output-path",
         type=str,
         default="models/tokenizer",
     )
     return parser.parse_args()
-
-
-def build_text_iterator(max_samples: int, max_chars: int) -> Iterator[str]:
-    # ---------------------------------------------------------
-    # Stream the SmolLM corpus split and yield only a bounded
-    # number of truncated text samples.
-    # ---------------------------------------------------------
-    dataset = load_dataset(
-        path=SMOLLM_CORPUS_PATH,
-        name=SMOLLM_CORPUS_SUBSET,
-        split=SMOLLM_CORPUS_SPLIT,
-        streaming=True,
-    )
-    progress = tqdm(total=max_samples, desc="CollectSamples")
-
-    # ---------------------------------------------------------
-    # Yield streamed samples one by one so Rust-side training
-    # can consume them without building a large Python list.
-    # ---------------------------------------------------------
-    for row in dataset.take(max_samples):
-        progress.update(1)
-        yield row["text"][:max_chars]
-
-    # ---------------------------------------------------------
-    # Close the sampling progress bar once the iterator ends.
-    # ---------------------------------------------------------
-    progress.close()
 
 
 def main() -> None:
@@ -75,11 +39,11 @@ def main() -> None:
     output_path = Path(args.output_path)
 
     # ---------------------------------------------------------
-    # Train the tokenizer from the streamed SmolLM corpus samples
-    # and persist it for AutoTokenizer.from_pretrained loading.
+    # Train the tokenizer from all configured corpus cases and
+    # persist it for AutoTokenizer.from_pretrained loading.
     # ---------------------------------------------------------
     tokenizer = ByteLevelBPE(vocab_size=args.vocab_size)
-    tokenizer.train(sentences=build_text_iterator(args.max_samples, args.max_chars))
+    tokenizer.train(sentences=stream_training_texts(TRAINING_CORPUS_CASES))
     tokenizer.save_pretrained(path=output_path)
 
 
