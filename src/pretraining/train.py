@@ -124,13 +124,13 @@ def parse_args() -> argparse.Namespace:
     # training run without restoring optimizer state.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-len", type=int, default=256)
+    parser.add_argument("--max-len", type=int, default=512)
     parser.add_argument("--d-model", type=int, default=1024)
     parser.add_argument("--num-layers", type=int, default=16)
     parser.add_argument("--num-heads", type=int, default=16)
     parser.add_argument("--d-ff", type=int, default=6656)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--max-steps", type=int, default=160000)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
