@@ -23,7 +23,7 @@ class PretrainingTrainTest(unittest.TestCase):
         self.assertEqual(args.num_heads, 12)
         self.assertEqual(args.d_ff, 3072)
         self.assertEqual(args.batch_size, 64)
-        self.assertEqual(args.output_path, "models/model-160m-v1")
+        self.assertEqual(args.output_path, "models/lambda-160m")
 
     def test_parse_args_uses_warmup_cosine_lr_defaults(self) -> None:
         # ---------------------------------------------------------
