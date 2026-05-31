@@ -16,25 +16,14 @@ class TrainingCorpusCase:
 
 TRAINING_CORPUS_CASES = [
     TrainingCorpusCase(
-        name="fineweb-en",
-        genre="web",
-        language="en",
-        dataset_path="HuggingFaceFW/fineweb",
-        config_name="sample-10BT",
-        split="train",
-        text_column="text",
-        sample_count=128000,
-        max_chars=4096,
-    ),
-    TrainingCorpusCase(
-        name="fineweb-ja",
+        name="fineweb2-edu-ja",
         genre="web",
         language="ja",
-        dataset_path="HuggingFaceFW/fineweb-2",
-        config_name="jpn_Jpan",
+        dataset_path="hotchpotch/fineweb-2-edu-japanese",
+        config_name="default",
         split="train",
         text_column="text",
-        sample_count=128000,
+        sample_count=256000,
         max_chars=4096,
     ),
 ]
