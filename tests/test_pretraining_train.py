@@ -170,40 +170,32 @@ class PretrainingTrainTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parse_args()
 
-    def test_parse_args_accepts_hub_push_settings(self) -> None:
+    def test_parse_args_accepts_hub_push_with_env_repo(self) -> None:
         # ---------------------------------------------------------
-        # Accept explicit Hub publishing settings so completed
-        # training artifacts can be uploaded after local saving.
+        # Accept Hub publishing only when the destination repository
+        # is provided through the environment.
         # ---------------------------------------------------------
         argv = [
             "train.py",
             "--push-to-hub",
-            "--hub-repo-id",
-            "user/myllm",
-            "--hub-private",
-            "--hub-commit-message",
-            "test upload",
         ]
 
-        with patch("sys.argv", argv):
+        with patch("sys.argv", argv), patch.dict("os.environ", {"HF_REPO": "user/myllm"}):
             args = parse_args()
 
         self.assertTrue(args.push_to_hub)
-        self.assertEqual(args.hub_repo_id, "user/myllm")
-        self.assertTrue(args.hub_private)
-        self.assertEqual(args.hub_commit_message, "test upload")
 
-    def test_parse_args_rejects_missing_hub_repo_id(self) -> None:
+    def test_parse_args_rejects_missing_hf_repo(self) -> None:
         # ---------------------------------------------------------
-        # Reject Hub publishing without a destination repository so
-        # training never finishes with an ambiguous upload target.
+        # Reject Hub publishing without HF_REPO so training never
+        # finishes with an ambiguous upload target.
         # ---------------------------------------------------------
         argv = [
             "train.py",
             "--push-to-hub",
         ]
 
-        with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+        with patch("sys.argv", argv), patch.dict("os.environ", {}, clear=True), patch("sys.stderr", io.StringIO()):
             with self.assertRaises(SystemExit):
                 parse_args()
 
