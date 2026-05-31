@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import torch
 
-from src.inference_it.cli import parse_args
-from src.inference_it.generation import generate_continuation_text
-from src.inference_it.generation import resolve_torch_dtype
+from src.inference_base.cli import parse_args
+from src.inference_base.generation import generate_continuation_text
+from src.inference_base.generation import resolve_torch_dtype
 
 
 class FakeBatch(dict[str, torch.Tensor]):

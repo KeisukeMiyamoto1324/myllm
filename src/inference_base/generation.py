@@ -1,73 +1,61 @@
 import torch
-
-from src.inference_base.sampling import sample_next_token_id
-from src.pretraining.transformer import DecoderOnlyTransformer
-from src.tokenizer.tokenizer import ByteLevelBPE
+from transformers import PreTrainedModel
+from transformers import PreTrainedTokenizerBase
 
 
-def generate_token_ids(
-    model: DecoderOnlyTransformer,
-    tokenizer: ByteLevelBPE,
+def resolve_torch_dtype(torch_dtype: str) -> torch.dtype | str:
+    # ---------------------------------------------------------
+    # Convert CLI dtype names into values accepted by Transformers
+    # from_pretrained while preserving its automatic dtype mode.
+    # ---------------------------------------------------------
+    dtype_by_name: dict[str, torch.dtype | str] = {
+        "auto": "auto",
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
+    return dtype_by_name[torch_dtype]
+
+
+def generate_continuation_text(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
     prompt: str,
-    max_len: int,
     max_new_tokens: int,
-    device: torch.device,
-    top_k: int,
+    do_sample: bool,
     temperature: float,
-) -> list[int]:
+    top_p: float,
+    repetition_penalty: float,
+) -> str:
     # ---------------------------------------------------------
-    # Encode the prompt with BOS so inference matches the document
-    # boundary format used during training.
+    # Tokenize the raw prompt and move tensors onto the model device
+    # selected by Transformers.
     # ---------------------------------------------------------
-    bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
-    prompt_token_ids = [
-        bos_token_id,
-        *tokenizer.tokenize(sentence=prompt),
-    ]
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    prompt_token_count = inputs["input_ids"].size(dim=1)
 
     # ---------------------------------------------------------
-    # Move the initial sequence onto the target device for
-    # autoregressive generation.
-    # ---------------------------------------------------------
-    model_input = torch.tensor(prompt_token_ids, dtype=torch.long).unsqueeze(0).to(device)
-    eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
-    max_generation_steps = min(max_new_tokens, max_len - len(prompt_token_ids))
-    generated_token_ids: list[int] = []
-
-    # ---------------------------------------------------------
-    # Stop immediately when the prompt already consumes the full
-    # context window configured for the trained model.
-    # ---------------------------------------------------------
-    if max_generation_steps <= 0:
-        return generated_token_ids
-
-    # ---------------------------------------------------------
-    # Run the prompt once to fill the KV cache, then feed only the
-    # latest sampled token on later generation steps.
+    # Delegate continuation decoding to Hugging Face generation and
+    # stop on the tokenizer EOS token.
     # ---------------------------------------------------------
     with torch.no_grad():
-        predictions, key_value_cache = model.forward_with_cache(
-            token_ids=model_input,
-            past_key_values=None,
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
         )
 
-        for step_index in range(max_generation_steps):
-            predicted_id = sample_next_token_id(
-                logits=predictions[:, -1, :],
-                top_k=top_k,
-                temperature=temperature,
-            )
-            predicted_token_id = int(predicted_id.item())
-
-            if predicted_token_id == eos_token_id:
-                break
-
-            generated_token_ids.append(predicted_token_id)
-
-            if step_index + 1 < max_generation_steps:
-                predictions, key_value_cache = model.forward_with_cache(
-                    token_ids=predicted_id,
-                    past_key_values=key_value_cache,
-                )
-
-    return generated_token_ids
+    # ---------------------------------------------------------
+    # Decode only newly generated tokens so the continuation does
+    # not repeat the original prompt.
+    # ---------------------------------------------------------
+    generated_ids = output_ids[0, prompt_token_count:]
+    return tokenizer.decode(
+        generated_ids,
+        skip_special_tokens=True,
+    ).strip()

@@ -1,6 +1,9 @@
 import sys
 from pathlib import Path
 
+from transformers import AutoModelForCausalLM
+from transformers import AutoTokenizer
+
 # ---------------------------------------------------------
 # Add the project root to the import path so direct script
 # execution can import the project packages consistently.
@@ -9,51 +12,42 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.inference_base.cli import parse_args
-from src.inference_base.generation import generate_token_ids
-from src.inference_base.model_loader import build_model, load_model_config
-from src.pretraining.device_utils import resolve_device
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.inference_base.generation import generate_continuation_text
+from src.inference_base.generation import resolve_torch_dtype
 
 
 def main() -> None:
     # ---------------------------------------------------------
-    # Parse the CLI arguments and resolve the saved model files
-    # used to run inference with the trained artifacts.
+    # Parse runtime settings and load Hugging Face-compatible
+    # artifacts from a local directory or Hub repository id.
     # ---------------------------------------------------------
-    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-100m-v3")
-    model_dir = Path(args.model_dir)
-    model_path = model_dir / "model.pth"
-    device = resolve_device()
-
-    # ---------------------------------------------------------
-    # Load the tokenizer and model configuration before the
-    # model weights are reconstructed on the active device.
-    # ---------------------------------------------------------
-    tokenizer = ByteLevelBPE.load(model_dir)
-    model_config = load_model_config(model_dir=model_dir)
-    model = build_model(
-        tokenizer=tokenizer,
-        model_config=model_config,
-        model_path=model_path,
-        device=device,
+    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-350m-v1")
+    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_dir,
+        trust_remote_code=True,
+        device_map="auto",
+        dtype=resolve_torch_dtype(torch_dtype=args.torch_dtype),
     )
+    model.eval()
 
     # ---------------------------------------------------------
-    # Generate token ids from the prompt and decode them into
-    # text with the same tokenizer used during training.
+    # Run an interactive continuation loop where the user's text is
+    # passed directly to the language model as the prompt.
     # ---------------------------------------------------------
-    generated_token_ids = generate_token_ids(
+    user_text = input("user> ").strip()
+
+    generated_text = generate_continuation_text(
         model=model,
         tokenizer=tokenizer,
-        prompt=args.prompt,
-        max_len=int(model_config["max_len"]),
+        prompt=user_text,
         max_new_tokens=args.max_new_tokens,
-        device=device,
-        top_k=args.top_k,
+        do_sample=args.do_sample,
         temperature=args.temperature,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
     )
-    generated_text = tokenizer.detokenize(token_ids=generated_token_ids)
-    print(f"predicted tokens: \n{generated_text}")
+    print(f"model> {generated_text}")
 
 
 if __name__ == "__main__":
