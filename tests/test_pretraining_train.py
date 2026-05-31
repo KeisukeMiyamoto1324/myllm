@@ -154,6 +154,43 @@ class PretrainingTrainTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parse_args()
 
+    def test_parse_args_accepts_hub_push_settings(self) -> None:
+        # ---------------------------------------------------------
+        # Accept explicit Hub publishing settings so completed
+        # training artifacts can be uploaded after local saving.
+        # ---------------------------------------------------------
+        argv = [
+            "train.py",
+            "--push-to-hub",
+            "--hub-repo-id",
+            "user/myllm",
+            "--hub-private",
+            "--hub-commit-message",
+            "test upload",
+        ]
+
+        with patch("sys.argv", argv):
+            args = parse_args()
+
+        self.assertTrue(args.push_to_hub)
+        self.assertEqual(args.hub_repo_id, "user/myllm")
+        self.assertTrue(args.hub_private)
+        self.assertEqual(args.hub_commit_message, "test upload")
+
+    def test_parse_args_rejects_missing_hub_repo_id(self) -> None:
+        # ---------------------------------------------------------
+        # Reject Hub publishing without a destination repository so
+        # training never finishes with an ambiguous upload target.
+        # ---------------------------------------------------------
+        argv = [
+            "train.py",
+            "--push-to-hub",
+        ]
+
+        with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parse_args()
+
 
 if __name__ == "__main__":
     unittest.main()

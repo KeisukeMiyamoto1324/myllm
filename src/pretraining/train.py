@@ -17,6 +17,9 @@ from src.pretraining.dataset import LocalTokenizedDataset
 from src.pretraining.dataset import MixedPretrainingDataset
 from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.device_utils import resolve_accelerator, resolve_precision
+from src.pretraining.hf_artifacts import copy_inference_code
+from src.pretraining.hf_artifacts import push_hf_pretrained_artifacts
+from src.pretraining.hf_artifacts import save_hf_pretrained_artifacts
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
 from src.pretraining.training_corpus_cases import WIKI_RAMP_START_PROGRESS
@@ -152,6 +155,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mix-cycle-tokens", type=int, default=100000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/model-350m-v1")
+    parser.add_argument("--push-to-hub", action="store_true")
+    parser.add_argument("--hub-repo-id", type=str, default="")
+    parser.add_argument("--hub-private", action="store_true")
+    parser.add_argument("--hub-commit-message", type=str, default="Upload pretrained MyLLM model")
 
     resume_group = parser.add_mutually_exclusive_group()
     resume_group.add_argument("--resume-from-checkpoint", type=str, default="")
@@ -178,6 +185,9 @@ def parse_args() -> argparse.Namespace:
 
     if args.continue_from_model and not Path(args.continue_from_model).is_file():
         parser.error("--continue-from-model must point to an existing model state file")
+
+    if args.push_to_hub and not args.hub_repo_id:
+        parser.error("--hub-repo-id is required when --push-to-hub is set")
 
     return args
 
@@ -419,41 +429,60 @@ def main() -> None:
     # ---------------------------------------------------------
     torch.save(model.state_dict(), model_dir / "model.pth")
 
+    model_config = {
+        "max_len": args.max_len,
+        "d_model": args.d_model,
+        "num_layers": args.num_layers,
+        "num_heads": args.num_heads,
+        "d_ff": args.d_ff,
+        "learning_rate": args.learning_rate,
+        "lr_schedule": "warmup_cosine",
+        "lr_warmup_steps": args.lr_warmup_steps,
+        "min_learning_rate": min_learning_rate,
+        "min_learning_rate_ratio": args.min_learning_rate_ratio,
+        "loss_chunk_size": args.loss_chunk_size,
+        "pad_token_id": pad_token_id,
+        "bos_token_id": bos_token_id,
+        "eos_token_id": eos_token_id,
+        "corpus_signature": corpus_signature,
+        "dataset_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
+        "mix_cycle_tokens": args.mix_cycle_tokens,
+        "ramp_start_progress": WIKI_RAMP_START_PROGRESS,
+        "val_split_modulo": args.val_split_modulo,
+        "val_split_index": args.val_split_index,
+        "validation_cache_path": str(validation_cache_path),
+        "validation_sample_count": validation_sample_count,
+        "trained_steps": trainer.global_step,
+    }
+
     with open(model_dir / "model_config.json", "w") as f:
-        json.dump(
-            {
-                "max_len": args.max_len,
-                "d_model": args.d_model,
-                "num_layers": args.num_layers,
-                "num_heads": args.num_heads,
-                "d_ff": args.d_ff,
-                "learning_rate": args.learning_rate,
-                "lr_schedule": "warmup_cosine",
-                "lr_warmup_steps": args.lr_warmup_steps,
-                "min_learning_rate": min_learning_rate,
-                "min_learning_rate_ratio": args.min_learning_rate_ratio,
-                "loss_chunk_size": args.loss_chunk_size,
-                "pad_token_id": pad_token_id,
-                "bos_token_id": bos_token_id,
-                "eos_token_id": eos_token_id,
-                "corpus_signature": corpus_signature,
-                "dataset_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
-                "mix_cycle_tokens": args.mix_cycle_tokens,
-                "ramp_start_progress": WIKI_RAMP_START_PROGRESS,
-                "val_split_modulo": args.val_split_modulo,
-                "val_split_index": args.val_split_index,
-                "validation_cache_path": str(validation_cache_path),
-                "validation_sample_count": validation_sample_count,
-                "trained_steps": trainer.global_step,
-            },
-            f,
-        )
+        json.dump(model_config, f)
 
     # ---------------------------------------------------------
     # Save the tokenizer beside the model so the model directory
     # can be loaded directly by AutoTokenizer.from_pretrained.
     # ---------------------------------------------------------
     tokenizer.save_pretrained(path=model_dir)
+
+    # ---------------------------------------------------------
+    # Save Transformers AutoModel artifacts beside the legacy files
+    # and optionally publish the portable inference folder to Hub.
+    # ---------------------------------------------------------
+    save_hf_pretrained_artifacts(
+        model=model,
+        model_config=model_config,
+        vocab_size=tokenizer.get_vocab_size(),
+        output_path=model_dir,
+    )
+    copy_inference_code(output_path=model_dir)
+
+    if args.push_to_hub:
+        push_hf_pretrained_artifacts(
+            output_path=model_dir,
+            repo_id=args.hub_repo_id,
+            private=args.hub_private,
+            commit_message=args.hub_commit_message,
+        )
 
 
 if __name__ == "__main__":
