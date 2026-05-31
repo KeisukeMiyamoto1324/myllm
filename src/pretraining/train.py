@@ -18,6 +18,7 @@ from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.device_utils import resolve_accelerator, resolve_precision
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
+from src.pretraining.training_corpus_cases import WIKI_RAMP_START_PROGRESS
 from src.pretraining.training_corpus_cases import serialize_pretraining_corpus_cases
 from src.tokenizer.tokenizer import ByteLevelBPE
 from src.pretraining.transformer import DecoderOnlyTransformer
@@ -163,14 +164,16 @@ def parse_args() -> argparse.Namespace:
 def build_corpus_signature(
     corpus_cases: list[PretrainingCorpusCase],
     mix_cycle_tokens: int,
+    ramp_start_progress: float,
 ) -> str:
     # ---------------------------------------------------------
     # Hash the corpus mixture into a short stable cache key so
-    # validation files change when datasets or percentages change.
+    # validation files change when datasets or schedule changes.
     # ---------------------------------------------------------
     payload = {
         "corpus_cases": serialize_pretraining_corpus_cases(corpus_cases),
         "mix_cycle_tokens": mix_cycle_tokens,
+        "ramp_start_progress": ramp_start_progress,
     }
     encoded_payload = json.dumps(payload, sort_keys=True).encode("utf-8")
     return blake2b(encoded_payload, digest_size=8).hexdigest()
@@ -198,6 +201,7 @@ def main() -> None:
     corpus_signature = build_corpus_signature(
         corpus_cases=PRETRAINING_CORPUS_CASES,
         mix_cycle_tokens=args.mix_cycle_tokens,
+        ramp_start_progress=WIKI_RAMP_START_PROGRESS,
     )
     default_validation_cache_path = (
         model_dir
@@ -215,10 +219,11 @@ def main() -> None:
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
+    total_training_tokens = args.max_steps * args.batch_size * args.max_len
 
     # ---------------------------------------------------------
-    # Stream the configured corpus mixture for training and use
-    # the same split rule to build a fixed validation cache.
+    # Stream the scheduled training mixture and use the final
+    # static ratio to build a fixed validation cache.
     # ---------------------------------------------------------
     train_dataset = MixedPretrainingDataset(
         corpus_cases=PRETRAINING_CORPUS_CASES,
@@ -228,6 +233,8 @@ def main() -> None:
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
         mix_cycle_tokens=args.mix_cycle_tokens,
+        total_training_tokens=total_training_tokens,
+        ramp_start_progress=WIKI_RAMP_START_PROGRESS,
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
     )
@@ -239,6 +246,7 @@ def main() -> None:
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
         mix_cycle_tokens=args.mix_cycle_tokens,
+        ramp_start_progress=WIKI_RAMP_START_PROGRESS,
         split_modulo=args.val_split_modulo,
         split_indexes=(args.val_split_index,),
     )
@@ -251,6 +259,7 @@ def main() -> None:
         "corpus_signature": corpus_signature,
         "corpus_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
         "mix_cycle_tokens": args.mix_cycle_tokens,
+        "ramp_start_progress": WIKI_RAMP_START_PROGRESS,
     }
 
     if not validation_cache_path.exists():
@@ -400,6 +409,7 @@ def main() -> None:
                 "corpus_signature": corpus_signature,
                 "dataset_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
                 "mix_cycle_tokens": args.mix_cycle_tokens,
+                "ramp_start_progress": WIKI_RAMP_START_PROGRESS,
                 "val_split_modulo": args.val_split_modulo,
                 "val_split_index": args.val_split_index,
                 "validation_cache_path": str(validation_cache_path),

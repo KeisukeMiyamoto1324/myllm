@@ -11,7 +11,9 @@ from src.pretraining.dataset import LocalTokenizedDataset
 from src.pretraining.dataset import MixedPretrainingDataset
 from src.pretraining.dataset import PretrainingCorpusDataset
 from src.pretraining.dataset import resolve_mix_token_targets
+from src.pretraining.dataset import resolve_scheduled_mix_percentages
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
+from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
 
 
 class FixedTokenDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]]):
@@ -38,7 +40,31 @@ class EmptyMixedPretrainingDataset(MixedPretrainingDataset):
         return iter(())
 
 
-def build_case(name: str, token_percentage: float) -> PretrainingCorpusCase:
+class NamedTokenMixedPretrainingDataset(MixedPretrainingDataset):
+    def _build_corpus_iterator(
+        self,
+        corpus_case: PretrainingCorpusCase,
+    ) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        # ---------------------------------------------------------
+        # Yield a source-specific token so tests can verify finite
+        # corpus exhaustion without opening remote datasets.
+        # ---------------------------------------------------------
+        token_id = 1 if corpus_case.name == "fineweb" else 2
+        input_ids = torch.tensor([token_id, 0], dtype=torch.long)
+        label_ids = torch.tensor([token_id, 0], dtype=torch.long)
+
+        if corpus_case.name == "wiki":
+            return iter([(input_ids, label_ids)])
+
+        return iter([(input_ids, label_ids) for _ in range(10)])
+
+
+def build_case(
+    name: str,
+    token_percentage: float,
+    is_ramped: bool = False,
+    repeat_on_end: bool = True,
+) -> PretrainingCorpusCase:
     # ---------------------------------------------------------
     # Build a minimal corpus case for tests that only need mixture
     # settings rather than real dataset streaming.
@@ -52,10 +78,49 @@ def build_case(name: str, token_percentage: float) -> PretrainingCorpusCase:
         split="train",
         text_column="text",
         token_percentage=token_percentage,
+        is_ramped=is_ramped,
+        repeat_on_end=repeat_on_end,
     )
 
 
 class PretrainingDatasetTest(unittest.TestCase):
+    def test_pretraining_corpus_cases_use_requested_japanese_datasets(self) -> None:
+        # ---------------------------------------------------------
+        # Keep the production corpus list pointed at the requested
+        # Japanese FineWeb and cleaned Wikipedia datasets.
+        # ---------------------------------------------------------
+        self.assertEqual(
+            [
+                (
+                    corpus_case.name,
+                    corpus_case.dataset_path,
+                    corpus_case.config_name,
+                    corpus_case.split,
+                    corpus_case.text_column,
+                    corpus_case.repeat_on_end,
+                )
+                for corpus_case in PRETRAINING_CORPUS_CASES
+            ],
+            [
+                (
+                    "fineweb2-edu-ja",
+                    "hotchpotch/fineweb-2-edu-japanese",
+                    "default",
+                    "train",
+                    "text",
+                    True,
+                ),
+                (
+                    "cleanedwiki-jp",
+                    "MK0727/CleanedWiki-jp",
+                    "all",
+                    "train",
+                    "text",
+                    True,
+                ),
+            ],
+        )
+
     def test_resolve_mix_token_targets_uses_percentages(self) -> None:
         # ---------------------------------------------------------
         # Convert 70/30 percentages into exact integer token targets
@@ -86,6 +151,86 @@ class PretrainingDatasetTest(unittest.TestCase):
                 corpus_cases=corpus_cases,
                 mix_cycle_tokens=10,
         )
+
+    def test_resolve_scheduled_mix_percentages_ramps_late_wiki(self) -> None:
+        # ---------------------------------------------------------
+        # Keep CleanedWiki out of early training, then linearly
+        # increase it to the final 70 percent by train end.
+        # ---------------------------------------------------------
+        corpus_cases = [
+            build_case(name="fineweb", token_percentage=30.0),
+            build_case(
+                name="wiki",
+                token_percentage=70.0,
+                is_ramped=True,
+                repeat_on_end=True,
+            ),
+        ]
+
+        self.assertEqual(
+            resolve_scheduled_mix_percentages(
+                corpus_cases=corpus_cases,
+                progress=0.0,
+                ramp_start_progress=0.5,
+            ),
+            [100.0, 0.0],
+        )
+        self.assertEqual(
+            resolve_scheduled_mix_percentages(
+                corpus_cases=corpus_cases,
+                progress=0.49,
+                ramp_start_progress=0.5,
+            ),
+            [100.0, 0.0],
+        )
+        self.assertEqual(
+            resolve_scheduled_mix_percentages(
+                corpus_cases=corpus_cases,
+                progress=0.75,
+                ramp_start_progress=0.5,
+            ),
+            [65.0, 35.0],
+        )
+        self.assertEqual(
+            resolve_scheduled_mix_percentages(
+                corpus_cases=corpus_cases,
+                progress=1.0,
+                ramp_start_progress=0.5,
+            ),
+            [30.0, 70.0],
+        )
+
+    def test_repeatable_wiki_reopens_after_stream_end(self) -> None:
+        # ---------------------------------------------------------
+        # Reopen CleanedWiki after stream end so the late-training
+        # mixture can keep using it at the scheduled percentage.
+        # ---------------------------------------------------------
+        dataset = NamedTokenMixedPretrainingDataset(
+            corpus_cases=[
+                build_case(name="fineweb", token_percentage=30.0),
+                build_case(
+                    name="wiki",
+                    token_percentage=70.0,
+                    is_ramped=True,
+                    repeat_on_end=True,
+                ),
+            ],
+            tokenizer=None,
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+            mix_cycle_tokens=10,
+            total_training_tokens=1,
+            ramp_start_progress=0.0,
+        )
+
+        dataset_iterator = iter(dataset)
+        input_ids = [next(dataset_iterator)[0] for _ in range(25)]
+        token_ids = [input_id[0].item() for input_id in input_ids]
+
+        self.assertEqual(token_ids.count(2), 9)
+        self.assertEqual(token_ids[:3], [1, 1, 1])
 
     def test_pretraining_corpus_partition_uses_text_column(self) -> None:
         # ---------------------------------------------------------
