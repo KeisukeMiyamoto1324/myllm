@@ -23,7 +23,7 @@ TRAINING_CORPUS_CASES = [
         config_name="default",
         split="train",
         text_column="text",
-        sample_count=256000,
-        max_chars=4096,
+        sample_count=51200,
+        max_chars=8192,
     ),
 ]
