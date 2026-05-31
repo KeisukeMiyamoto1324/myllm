@@ -21,7 +21,7 @@ def main() -> None:
     # Parse runtime settings and load Hugging Face-compatible
     # artifacts from a local directory or Hub repository id.
     # ---------------------------------------------------------
-    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-350m-v1")
+    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "model-160m-v1")
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
     model = AutoModelForCausalLM.from_pretrained(
         args.model_dir,

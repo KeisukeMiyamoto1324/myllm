@@ -9,6 +9,22 @@ from src.pretraining.transformer import resolve_warmup_cosine_learning_rate
 
 
 class PretrainingTrainTest(unittest.TestCase):
+    def test_parse_args_uses_160m_model_defaults(self) -> None:
+        # ---------------------------------------------------------
+        # Keep the default pretraining run near the 160M class while
+        # following the OpenCALM small width and FFN structure.
+        # ---------------------------------------------------------
+        with patch("sys.argv", ["train.py"]):
+            args = parse_args()
+
+        self.assertEqual(args.max_len, 1024)
+        self.assertEqual(args.d_model, 768)
+        self.assertEqual(args.num_layers, 16)
+        self.assertEqual(args.num_heads, 12)
+        self.assertEqual(args.d_ff, 3072)
+        self.assertEqual(args.batch_size, 64)
+        self.assertEqual(args.output_path, "models/model-160m-v1")
+
     def test_parse_args_uses_warmup_cosine_lr_defaults(self) -> None:
         # ---------------------------------------------------------
         # Keep the existing learning rate as the maximum value while

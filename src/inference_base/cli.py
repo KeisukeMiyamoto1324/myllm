@@ -1,7 +1,18 @@
 import argparse
 from pathlib import Path
 
-from src.inference_base.cli import positive_float
+
+def positive_float(value: str) -> float:
+    # ---------------------------------------------------------
+    # Convert CLI input into a positive float used by generation
+    # settings such as temperature and repetition penalty.
+    # ---------------------------------------------------------
+    parsed_value = float(value)
+
+    if parsed_value <= 0.0:
+        raise argparse.ArgumentTypeError("value must be greater than 0")
+
+    return parsed_value
 
 
 def probability_float(value: str) -> float:
