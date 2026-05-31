@@ -1,6 +1,7 @@
 import argparse
 from hashlib import blake2b
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -156,9 +157,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/model-160m-v1")
     parser.add_argument("--push-to-hub", action="store_true")
-    parser.add_argument("--hub-repo-id", type=str, default="")
-    parser.add_argument("--hub-private", action="store_true")
-    parser.add_argument("--hub-commit-message", type=str, default="Upload pretrained MyLLM model")
 
     resume_group = parser.add_mutually_exclusive_group()
     resume_group.add_argument("--resume-from-checkpoint", type=str, default="")
@@ -186,8 +184,8 @@ def parse_args() -> argparse.Namespace:
     if args.continue_from_model and not Path(args.continue_from_model).is_file():
         parser.error("--continue-from-model must point to an existing model state file")
 
-    if args.push_to_hub and not args.hub_repo_id:
-        parser.error("--hub-repo-id is required when --push-to-hub is set")
+    if args.push_to_hub and not os.environ.get("HF_REPO"):
+        parser.error("HF_REPO is required in the environment when --push-to-hub is set")
 
     return args
 
@@ -479,9 +477,9 @@ def main() -> None:
     if args.push_to_hub:
         push_hf_pretrained_artifacts(
             output_path=model_dir,
-            repo_id=args.hub_repo_id,
-            private=args.hub_private,
-            commit_message=args.hub_commit_message,
+            repo_id=os.environ["HF_REPO"],
+            private=True,
+            commit_message="Upload pretrained MyLLM model",
         )
 
 
