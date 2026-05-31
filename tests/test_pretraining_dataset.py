@@ -64,6 +64,7 @@ def build_case(
     token_percentage: float,
     is_ramped: bool = False,
     repeat_on_end: bool = True,
+    excluded_url_domains: tuple[str, ...] = (),
 ) -> PretrainingCorpusCase:
     # ---------------------------------------------------------
     # Build a minimal corpus case for tests that only need mixture
@@ -80,6 +81,7 @@ def build_case(
         token_percentage=token_percentage,
         is_ramped=is_ramped,
         repeat_on_end=repeat_on_end,
+        excluded_url_domains=excluded_url_domains,
     )
 
 
@@ -98,6 +100,7 @@ class PretrainingDatasetTest(unittest.TestCase):
                     corpus_case.split,
                     corpus_case.text_column,
                     corpus_case.repeat_on_end,
+                    corpus_case.excluded_url_domains,
                 )
                 for corpus_case in PRETRAINING_CORPUS_CASES
             ],
@@ -109,6 +112,7 @@ class PretrainingDatasetTest(unittest.TestCase):
                     "train",
                     "text",
                     True,
+                    ("wikipedia.org",),
                 ),
                 (
                     "cleanedwiki-jp",
@@ -117,6 +121,7 @@ class PretrainingDatasetTest(unittest.TestCase):
                     "train",
                     "text",
                     True,
+                    (),
                 ),
             ],
         )
@@ -267,6 +272,48 @@ class PretrainingDatasetTest(unittest.TestCase):
             )
         )
         self.assertIn(split_index, dataset.split_indexes)
+
+    def test_pretraining_corpus_filters_excluded_wikipedia_urls(self) -> None:
+        # ---------------------------------------------------------
+        # Drop only Wikipedia hostnames and subdomains from FineWeb
+        # while keeping unrelated wiki-looking domains available.
+        # ---------------------------------------------------------
+        corpus_case = build_case(
+            name="fineweb",
+            token_percentage=100.0,
+            excluded_url_domains=("wikipedia.org",),
+        )
+        dataset = PretrainingCorpusDataset(
+            corpus_case=corpus_case,
+            tokenizer=None,
+            max_len=4,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+
+        self.assertFalse(
+            dataset._contains_allowed_url(
+                sample={"url": "https://ja.wikipedia.org/wiki/Python"}
+            )
+        )
+        self.assertFalse(
+            dataset._contains_allowed_url(
+                sample={"url": "https://www.wikipedia.org/portal/"}
+            )
+        )
+        self.assertTrue(
+            dataset._contains_allowed_url(
+                sample={"url": "https://example.com/wiki/Python"}
+            )
+        )
+        self.assertTrue(
+            dataset._contains_allowed_url(
+                sample={"url": "https://ja.lotr.wikia.com/wiki/Page"}
+            )
+        )
+        self.assertTrue(dataset._contains_allowed_url(sample={"url": "not-a-url"}))
+        self.assertTrue(dataset._contains_allowed_url(sample={}))
 
     def test_mixed_dataset_reports_empty_filtered_corpus(self) -> None:
         # ---------------------------------------------------------

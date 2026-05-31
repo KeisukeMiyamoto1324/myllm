@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from hashlib import blake2b
 from pathlib import Path
+from urllib.parse import urlparse
 
 import torch
 from datasets import load_dataset
@@ -61,11 +62,11 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
         worker_index = worker_info.id if worker_info is not None else 0
 
         # ---------------------------------------------------------
-        # Route each streamed document into both the configured
-        # dataset split and the current DataLoader worker partition.
+        # Route each streamed document through corpus-specific URL
+        # exclusions, dataset split, and DataLoader worker partition.
         # ---------------------------------------------------------
         dataset = dataset.filter(
-            lambda sample: self._contains_partition(
+            lambda sample: self._contains_sample(
                 sample=sample,
                 worker_modulo=worker_modulo,
                 worker_index=worker_index,
@@ -78,6 +79,42 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
             # training sequence chunks and yield them immediately.
             # ---------------------------------------------------------
             yield from self._create_examples(text=sample[self.corpus_case.text_column])
+
+    def _contains_sample(
+        self,
+        sample: dict[str, str],
+        worker_modulo: int,
+        worker_index: int,
+    ) -> bool:
+        # ---------------------------------------------------------
+        # Apply URL exclusions before partitioning so known duplicate
+        # source domains never enter train or validation streams.
+        # ---------------------------------------------------------
+        return self._contains_allowed_url(sample=sample) and self._contains_partition(
+            sample=sample,
+            worker_modulo=worker_modulo,
+            worker_index=worker_index,
+        )
+
+    def _contains_allowed_url(self, sample: dict[str, str]) -> bool:
+        # ---------------------------------------------------------
+        # Keep samples without a usable URL and drop only configured
+        # domains plus their subdomains.
+        # ---------------------------------------------------------
+        if len(self.corpus_case.excluded_url_domains) == 0:
+            return True
+
+        hostname = urlparse(sample.get("url", "")).hostname
+
+        if hostname is None:
+            return True
+
+        normalized_hostname = hostname.lower()
+        return not any(
+            normalized_hostname == excluded_domain
+            or normalized_hostname.endswith(f".{excluded_domain}")
+            for excluded_domain in self.corpus_case.excluded_url_domains
+        )
 
     def _contains_partition(
         self,
