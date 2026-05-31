@@ -17,6 +17,7 @@ class PretrainingCorpusCase:
     token_percentage: float
     is_ramped: bool
     repeat_on_end: bool
+    excluded_url_domains: tuple[str, ...]
 
 
 PRETRAINING_CORPUS_CASES = [
@@ -31,6 +32,7 @@ PRETRAINING_CORPUS_CASES = [
         token_percentage=30.0,
         is_ramped=False,
         repeat_on_end=True,
+        excluded_url_domains=("wikipedia.org",),
     ),
     PretrainingCorpusCase(
         name="cleanedwiki-jp",
@@ -43,13 +45,14 @@ PRETRAINING_CORPUS_CASES = [
         token_percentage=70.0,
         is_ramped=True,
         repeat_on_end=True,
+        excluded_url_domains=(),
     ),
 ]
 
 
 def serialize_pretraining_corpus_cases(
     corpus_cases: list[PretrainingCorpusCase],
-) -> list[dict[str, str | float | bool]]:
+) -> list[dict[str, str | float | bool | tuple[str, ...]]]:
     # ---------------------------------------------------------
     # Convert corpus cases to JSON-compatible dictionaries so
     # training artifacts can record the exact data mixture.
