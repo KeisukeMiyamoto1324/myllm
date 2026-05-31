@@ -155,7 +155,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss-chunk-size", type=int, default=32)
     parser.add_argument("--mix-cycle-tokens", type=int, default=100000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
-    parser.add_argument("--output-path", type=str, default="models/model-160m-v1")
+    parser.add_argument("--output-path", type=str, default="models/lambda-160m")
     parser.add_argument("--push-to-hub", action="store_true")
 
     resume_group = parser.add_mutually_exclusive_group()
