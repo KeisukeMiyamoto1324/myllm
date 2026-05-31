@@ -6,6 +6,7 @@ import sys
 
 import lightning as L
 import torch
+from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
@@ -53,8 +54,16 @@ def parse_args() -> argparse.Namespace:
     # This is the expansion dimension used after attention.
     #
     # --learning-rate:
-    # Optimizer step size. Larger values update weights faster,
-    # while smaller values tend to make training more stable.
+    # Maximum optimizer step size after warmup. Larger values update
+    # weights faster, while smaller values tend to be more stable.
+    #
+    # --lr-warmup-steps:
+    # Number of optimizer steps used to linearly increase the
+    # learning rate from zero to --learning-rate.
+    #
+    # --min-learning-rate-ratio:
+    # Final cosine-decay learning rate as a ratio of --learning-rate.
+    # A positive floor keeps small updates active near train end.
     #
     # --batch-size:
     # Number of samples processed in one optimizer step. Larger
@@ -127,6 +136,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-heads", type=int, default=16)
     parser.add_argument("--d-ff", type=int, default=6656)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
+    parser.add_argument("--lr-warmup-steps", type=int, default=2000)
+    parser.add_argument("--min-learning-rate-ratio", type=float, default=0.1)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--max-steps", type=int, default=160000)
     parser.add_argument("--num-workers", type=int, default=4)
@@ -147,6 +158,16 @@ def parse_args() -> argparse.Namespace:
     resume_group.add_argument("--continue-from-model", type=str, default="")
 
     args = parser.parse_args()
+
+    # ---------------------------------------------------------
+    # Reject invalid LR schedule settings before any model or
+    # streaming dataset state is initialized.
+    # ---------------------------------------------------------
+    if args.lr_warmup_steps < 0 or args.lr_warmup_steps >= args.max_steps:
+        parser.error("--lr-warmup-steps must be greater than or equal to 0 and less than --max-steps")
+
+    if args.min_learning_rate_ratio < 0.0 or args.min_learning_rate_ratio > 1.0:
+        parser.error("--min-learning-rate-ratio must be between 0.0 and 1.0")
 
     # ---------------------------------------------------------
     # Reject missing resume inputs before streaming datasets or
@@ -220,6 +241,7 @@ def main() -> None:
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
     total_training_tokens = args.max_steps * args.batch_size * args.max_len
+    min_learning_rate = args.learning_rate * args.min_learning_rate_ratio
 
     # ---------------------------------------------------------
     # Stream the scheduled training mixture and use the final
@@ -307,6 +329,9 @@ def main() -> None:
         pad_token_id=pad_token_id,
         use_fused_optimizer=accelerator == "cuda",
         loss_chunk_size=args.loss_chunk_size,
+        lr_warmup_steps=args.lr_warmup_steps,
+        lr_total_steps=args.max_steps,
+        min_learning_rate=min_learning_rate,
     )
 
     # ---------------------------------------------------------
@@ -341,6 +366,7 @@ def main() -> None:
             save_top_k=1,
             save_last=True,
         ),
+        LearningRateMonitor(logging_interval="step"),
     ]
 
     # ---------------------------------------------------------
@@ -402,6 +428,10 @@ def main() -> None:
                 "num_heads": args.num_heads,
                 "d_ff": args.d_ff,
                 "learning_rate": args.learning_rate,
+                "lr_schedule": "warmup_cosine",
+                "lr_warmup_steps": args.lr_warmup_steps,
+                "min_learning_rate": min_learning_rate,
+                "min_learning_rate_ratio": args.min_learning_rate_ratio,
                 "loss_chunk_size": args.loss_chunk_size,
                 "pad_token_id": pad_token_id,
                 "bos_token_id": bos_token_id,

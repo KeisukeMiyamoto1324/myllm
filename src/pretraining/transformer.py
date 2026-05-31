@@ -1,6 +1,9 @@
+import math
+
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
 
 from src.pretraining.kv_cache import KeyValueCache, LayerKeyValueCache
@@ -106,6 +109,9 @@ class DecoderOnlyTransformer(L.LightningModule):
         pad_token_id: int = 0,
         use_fused_optimizer: bool = False,
         loss_chunk_size: int = 32,
+        lr_warmup_steps: int | None = None,
+        lr_total_steps: int | None = None,
+        min_learning_rate: float | None = None,
     ) -> None:
         super().__init__()
 
@@ -130,6 +136,20 @@ class DecoderOnlyTransformer(L.LightningModule):
         self.pad_token_id = pad_token_id
         self.use_fused_optimizer = use_fused_optimizer
         self.loss_chunk_size = loss_chunk_size
+        self.lr_warmup_steps = lr_warmup_steps
+        self.lr_total_steps = lr_total_steps
+        self.min_learning_rate = min_learning_rate
+
+        # ---------------------------------------------------------
+        # Reject partially configured schedules so posttraining can
+        # keep fixed LR while pretraining opts into full scheduling.
+        # ---------------------------------------------------------
+        lr_schedule_values = [lr_warmup_steps, lr_total_steps, min_learning_rate]
+
+        if any(value is None for value in lr_schedule_values) and any(
+            value is not None for value in lr_schedule_values
+        ):
+            raise ValueError("LR schedule requires warmup steps, total steps, and minimum learning rate")
 
         # ---------------------------------------------------------
         # Keep summed token loss local so large vocabulary logits
@@ -203,16 +223,43 @@ class DecoderOnlyTransformer(L.LightningModule):
         normalized_hidden_states = self.final_norm(hidden_states)
         return self.fc_layer(normalized_hidden_states), next_key_values
 
-    def configure_optimizers(self) -> AdamW:
+    def configure_optimizers(self) -> AdamW | dict[str, object]:
         # ---------------------------------------------------------
         # Use AdamW for decoupled weight decay and enable the fused
         # CUDA implementation only when the training script requests it.
         # ---------------------------------------------------------
-        return AdamW(
+        optimizer = AdamW(
             self.parameters(),
             lr=self.learning_rate,
             fused=self.use_fused_optimizer,
         )
+
+        # ---------------------------------------------------------
+        # Keep callers without scheduler settings on fixed learning
+        # rate while pretraining uses step-wise warmup and cosine decay.
+        # ---------------------------------------------------------
+        if self.lr_warmup_steps is None or self.lr_total_steps is None or self.min_learning_rate is None:
+            return optimizer
+
+        scheduler = LambdaLR(
+            optimizer=optimizer,
+            lr_lambda=lambda step: resolve_warmup_cosine_learning_rate(
+                step=step,
+                max_learning_rate=self.learning_rate,
+                min_learning_rate=self.min_learning_rate,
+                warmup_steps=self.lr_warmup_steps,
+                total_steps=self.lr_total_steps,
+            )
+            / self.learning_rate,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
+        }
 
     def compute_chunked_loss(self, input_tokens: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
@@ -261,3 +308,22 @@ class DecoderOnlyTransformer(L.LightningModule):
         loss = self.compute_chunked_loss(input_tokens=input_tokens, labels=labels)
         self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         return loss
+
+
+def resolve_warmup_cosine_learning_rate(
+    step: int,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_steps: int,
+    total_steps: int,
+) -> float:
+    # ---------------------------------------------------------
+    # Raise the learning rate linearly at the start, then decay it
+    # smoothly to the configured minimum by the final training step.
+    # ---------------------------------------------------------
+    if step < warmup_steps:
+        return max_learning_rate * step / warmup_steps
+
+    decay_progress = min(1.0, (step - warmup_steps) / (total_steps - warmup_steps))
+    cosine_scale = 0.5 * (1.0 + math.cos(math.pi * decay_progress))
+    return min_learning_rate + (max_learning_rate - min_learning_rate) * cosine_scale

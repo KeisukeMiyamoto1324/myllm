@@ -5,9 +5,98 @@ import unittest
 from unittest.mock import patch
 
 from src.pretraining.train import parse_args
+from src.pretraining.transformer import resolve_warmup_cosine_learning_rate
 
 
 class PretrainingTrainTest(unittest.TestCase):
+    def test_parse_args_uses_warmup_cosine_lr_defaults(self) -> None:
+        # ---------------------------------------------------------
+        # Keep the existing learning rate as the maximum value while
+        # enabling warmup and cosine decay by default.
+        # ---------------------------------------------------------
+        with patch("sys.argv", ["train.py"]):
+            args = parse_args()
+
+        self.assertEqual(args.learning_rate, 2e-4)
+        self.assertEqual(args.lr_warmup_steps, 2000)
+        self.assertEqual(args.min_learning_rate_ratio, 0.1)
+
+    def test_parse_args_rejects_invalid_lr_schedule(self) -> None:
+        # ---------------------------------------------------------
+        # Reject schedule values that cannot form a bounded warmup
+        # and decay interval before training starts.
+        # ---------------------------------------------------------
+        argv = [
+            "train.py",
+            "--max-steps",
+            "2000",
+            "--lr-warmup-steps",
+            "2000",
+        ]
+
+        with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parse_args()
+
+        argv = [
+            "train.py",
+            "--min-learning-rate-ratio",
+            "1.1",
+        ]
+
+        with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parse_args()
+
+    def test_resolve_warmup_cosine_learning_rate(self) -> None:
+        # ---------------------------------------------------------
+        # Match the modern pretraining schedule: zero start, linear
+        # warmup to max LR, then cosine decay to the minimum LR.
+        # ---------------------------------------------------------
+        max_learning_rate = 2e-4
+        min_learning_rate = 2e-5
+
+        self.assertEqual(
+            resolve_warmup_cosine_learning_rate(
+                step=0,
+                max_learning_rate=max_learning_rate,
+                min_learning_rate=min_learning_rate,
+                warmup_steps=2000,
+                total_steps=600000,
+            ),
+            0.0,
+        )
+        self.assertEqual(
+            resolve_warmup_cosine_learning_rate(
+                step=1000,
+                max_learning_rate=max_learning_rate,
+                min_learning_rate=min_learning_rate,
+                warmup_steps=2000,
+                total_steps=600000,
+            ),
+            1e-4,
+        )
+        self.assertEqual(
+            resolve_warmup_cosine_learning_rate(
+                step=2000,
+                max_learning_rate=max_learning_rate,
+                min_learning_rate=min_learning_rate,
+                warmup_steps=2000,
+                total_steps=600000,
+            ),
+            max_learning_rate,
+        )
+        self.assertAlmostEqual(
+            resolve_warmup_cosine_learning_rate(
+                step=600000,
+                max_learning_rate=max_learning_rate,
+                min_learning_rate=min_learning_rate,
+                warmup_steps=2000,
+                total_steps=600000,
+            ),
+            min_learning_rate,
+        )
+
     def test_parse_args_accepts_resume_checkpoint_path(self) -> None:
         # ---------------------------------------------------------
         # Accept an existing Lightning checkpoint path so interrupted
