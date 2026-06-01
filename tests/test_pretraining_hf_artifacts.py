@@ -85,7 +85,12 @@ class PretrainingHfArtifactsTest(unittest.TestCase):
         )
         model = MyLLMForCausalLM(config=config)
         input_ids = torch.tensor([[1, 3, 4]], dtype=torch.long)
-        output = model(input_ids=input_ids, labels=input_ids)
+        attention_mask = torch.ones_like(input_ids)
+        output = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=input_ids,
+        )
 
         self.assertEqual(tuple(output.logits.shape), (1, 3, 12))
         self.assertIsNotNone(output.loss)

@@ -98,6 +98,7 @@ class MyLLMForCausalLM(PreTrainedModel, GenerationMixin):
     def forward(
         self,
         input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
         past_key_values: KeyValueCache | None = None,
         use_cache: bool | None = None,
@@ -108,7 +109,7 @@ class MyLLMForCausalLM(PreTrainedModel, GenerationMixin):
         # Accept the standard AutoModelForCausalLM argument names and
         # delegate the actual tensor computation to the PyTorch model.
         # ---------------------------------------------------------
-        del kwargs
+        del attention_mask, kwargs
 
         if input_ids is None:
             raise ValueError("input_ids is required")
