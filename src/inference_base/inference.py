@@ -22,7 +22,10 @@ def main() -> None:
     # artifacts from a local directory or Hub repository id.
     # ---------------------------------------------------------
     args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "lambda-160m")
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_dir,
+        trust_remote_code=True,
+    )
     model = AutoModelForCausalLM.from_pretrained(
         args.model_dir,
         trust_remote_code=True,
@@ -45,6 +48,7 @@ def main() -> None:
         do_sample=args.do_sample,
         temperature=args.temperature,
         top_p=args.top_p,
+        top_k=args.top_k,
         repetition_penalty=args.repetition_penalty,
     )
     print(f"model> {generated_text}")

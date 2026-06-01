@@ -85,6 +85,7 @@ class InferenceItTest(unittest.TestCase):
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
+            top_k=40,
             repetition_penalty=1.05,
         )
 
@@ -95,6 +96,7 @@ class InferenceItTest(unittest.TestCase):
         self.assertEqual(model.generate_kwargs["do_sample"], True)
         self.assertEqual(model.generate_kwargs["temperature"], 0.7)
         self.assertEqual(model.generate_kwargs["top_p"], 0.9)
+        self.assertEqual(model.generate_kwargs["top_k"], 40)
         self.assertEqual(model.generate_kwargs["repetition_penalty"], 1.05)
         self.assertEqual(model.generate_kwargs["eos_token_id"], 2)
         self.assertEqual(model.generate_kwargs["pad_token_id"], 0)
@@ -112,6 +114,8 @@ class InferenceItTest(unittest.TestCase):
                 "--no-do-sample",
                 "--top-p",
                 "0.8",
+                "--top-k",
+                "32",
                 "--repetition-penalty",
                 "1.2",
                 "--torch-dtype",
@@ -124,6 +128,7 @@ class InferenceItTest(unittest.TestCase):
         self.assertEqual(args.model_dir, "user/myllm")
         self.assertFalse(args.do_sample)
         self.assertEqual(args.top_p, 0.8)
+        self.assertEqual(args.top_k, 32)
         self.assertEqual(args.repetition_penalty, 1.2)
         self.assertEqual(args.torch_dtype, "float16")
 

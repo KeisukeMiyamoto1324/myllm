@@ -25,6 +25,7 @@ def generate_continuation_text(
     do_sample: bool,
     temperature: float,
     top_p: float,
+    top_k: int,
     repetition_penalty: float,
 ) -> str:
     # ---------------------------------------------------------
@@ -45,6 +46,7 @@ def generate_continuation_text(
             do_sample=do_sample,
             temperature=temperature,
             top_p=top_p,
+            top_k=top_k,
             repetition_penalty=repetition_penalty,
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.pad_token_id,
