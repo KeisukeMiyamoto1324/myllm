@@ -237,7 +237,7 @@ class PretrainingDatasetTest(unittest.TestCase):
         self.assertEqual(token_ids.count(2), 9)
         self.assertEqual(token_ids[:3], [1, 1, 1])
 
-    def test_pretraining_corpus_partition_uses_text_column(self) -> None:
+    def test_pretraining_corpus_split_uses_text_column(self) -> None:
         # ---------------------------------------------------------
         # Split a sample by its configured text column instead of a
         # hard-coded column name.
@@ -255,20 +255,10 @@ class PretrainingDatasetTest(unittest.TestCase):
         sample = {"body": "hello", "text": "different"}
         document_index = dataset._resolve_document_index(text=sample["body"])
         split_index = document_index % dataset.split_modulo
-        worker_index = (document_index // dataset.split_modulo) % 2
 
         self.assertTrue(
             dataset._contains_partition(
                 sample=sample,
-                worker_modulo=2,
-                worker_index=worker_index,
-            )
-        )
-        self.assertFalse(
-            dataset._contains_partition(
-                sample=sample,
-                worker_modulo=2,
-                worker_index=1 - worker_index,
             )
         )
         self.assertIn(split_index, dataset.split_indexes)

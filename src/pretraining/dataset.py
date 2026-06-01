@@ -54,22 +54,12 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
         )
 
         # ---------------------------------------------------------
-        # Partition documents per worker with the same stable hash
-        # used for train-validation splitting.
-        # ---------------------------------------------------------
-        worker_info = get_worker_info()
-        worker_modulo = worker_info.num_workers if worker_info is not None else 1
-        worker_index = worker_info.id if worker_info is not None else 0
-
-        # ---------------------------------------------------------
         # Route each streamed document through corpus-specific URL
-        # exclusions, dataset split, and DataLoader worker partition.
+        # exclusions and the deterministic train-validation split.
         # ---------------------------------------------------------
         dataset = dataset.filter(
             lambda sample: self._contains_sample(
                 sample=sample,
-                worker_modulo=worker_modulo,
-                worker_index=worker_index,
             )
         )
 
@@ -83,17 +73,13 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
     def _contains_sample(
         self,
         sample: dict[str, str],
-        worker_modulo: int,
-        worker_index: int,
     ) -> bool:
         # ---------------------------------------------------------
-        # Apply URL exclusions before partitioning so known duplicate
-        # source domains never enter train or validation streams.
+        # Apply URL exclusions before splitting so known duplicate
+        # source domains stay out of both train and validation.
         # ---------------------------------------------------------
         return self._contains_allowed_url(sample=sample) and self._contains_partition(
             sample=sample,
-            worker_modulo=worker_modulo,
-            worker_index=worker_index,
         )
 
     def _contains_allowed_url(self, sample: dict[str, str]) -> bool:
@@ -119,19 +105,16 @@ class PretrainingCorpusDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor]
     def _contains_partition(
         self,
         sample: dict[str, str],
-        worker_modulo: int,
-        worker_index: int,
     ) -> bool:
         # ---------------------------------------------------------
-        # Use one deterministic document-content hash so split and
-        # worker membership stay independent of remote file shards.
+        # Use one deterministic document-content hash so train and
+        # validation membership stay independent of remote shards.
         # ---------------------------------------------------------
         document_index = self._resolve_document_index(
             text=sample[self.corpus_case.text_column],
         )
         split_index = document_index % self.split_modulo
-        partition_index = (document_index // self.split_modulo) % worker_modulo
-        return split_index in self.split_indexes and partition_index == worker_index
+        return split_index in self.split_indexes
 
     def _resolve_document_index(self, text: str) -> int:
         # ---------------------------------------------------------
