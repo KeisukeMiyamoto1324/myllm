@@ -38,7 +38,10 @@ def main() -> None:
     # Run an interactive continuation loop where the user's text is
     # passed directly to the language model as the prompt.
     # ---------------------------------------------------------
-    user_text = input("user> ").strip()
+    user_text = args.prompt.strip()
+
+    if not user_text:
+        user_text = input("user> ").strip()
 
     generated_text = generate_continuation_text(
         model=model,
