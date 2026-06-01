@@ -49,6 +49,7 @@ def parse_args(default_model_dir: Path) -> argparse.Namespace:
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", type=str, default=str(default_model_dir))
+    parser.add_argument("--prompt", "--promot", type=str, default="")
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--do-sample", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--temperature", type=positive_float, default=0.7)

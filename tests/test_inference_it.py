@@ -111,6 +111,8 @@ class InferenceItTest(unittest.TestCase):
                 "inference.py",
                 "--model-dir",
                 "user/myllm",
+                "--prompt",
+                "hello",
                 "--no-do-sample",
                 "--top-p",
                 "0.8",
@@ -126,6 +128,7 @@ class InferenceItTest(unittest.TestCase):
                 args = parse_args(default_model_dir=Path(temp_dir))
 
         self.assertEqual(args.model_dir, "user/myllm")
+        self.assertEqual(args.prompt, "hello")
         self.assertFalse(args.do_sample)
         self.assertEqual(args.top_p, 0.8)
         self.assertEqual(args.top_k, 32)
