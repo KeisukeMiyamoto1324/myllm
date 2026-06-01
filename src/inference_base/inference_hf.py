@@ -1,5 +1,8 @@
+import os
 import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # ---------------------------------------------------------
 # Add the project root to the import path so direct script
@@ -14,10 +17,12 @@ from src.inference_base.runtime import run_inference
 
 def main() -> None:
     # ---------------------------------------------------------
-    # Parse runtime settings and load Hugging Face-compatible
-    # artifacts from a local directory or Hub repository id.
+    # Load the Hub repository id from .env and use it as the
+    # default model source for inference.
     # ---------------------------------------------------------
-    args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "lambda-160m")
+    load_dotenv()
+
+    args = parse_args(default_model_dir=Path(os.environ["HF_REPO"]))
     run_inference(args=args)
 
 
