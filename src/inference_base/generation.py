@@ -27,6 +27,7 @@ def generate_continuation_text(
     top_p: float,
     top_k: int,
     repetition_penalty: float,
+    no_repeat_ngram_size: int,
 ) -> str:
     # ---------------------------------------------------------
     # Tokenize the raw prompt and move tensors onto the model device
@@ -48,6 +49,7 @@ def generate_continuation_text(
             top_p=top_p,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.pad_token_id,
         )

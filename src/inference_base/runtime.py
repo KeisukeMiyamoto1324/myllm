@@ -47,5 +47,6 @@ def run_inference(args: argparse.Namespace) -> None:
         top_p=args.top_p,
         top_k=args.top_k,
         repetition_penalty=args.repetition_penalty,
+        no_repeat_ngram_size=args.no_repeat_ngram_size,
     )
     print(f"model> {generated_text}")

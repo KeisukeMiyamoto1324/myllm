@@ -87,6 +87,7 @@ class InferenceItTest(unittest.TestCase):
             top_p=0.9,
             top_k=40,
             repetition_penalty=1.05,
+            no_repeat_ngram_size=3,
         )
 
         self.assertEqual(text, "continuation text")
@@ -98,6 +99,7 @@ class InferenceItTest(unittest.TestCase):
         self.assertEqual(model.generate_kwargs["top_p"], 0.9)
         self.assertEqual(model.generate_kwargs["top_k"], 40)
         self.assertEqual(model.generate_kwargs["repetition_penalty"], 1.05)
+        self.assertEqual(model.generate_kwargs["no_repeat_ngram_size"], 3)
         self.assertEqual(model.generate_kwargs["eos_token_id"], 2)
         self.assertEqual(model.generate_kwargs["pad_token_id"], 0)
 
@@ -120,6 +122,8 @@ class InferenceItTest(unittest.TestCase):
                 "32",
                 "--repetition-penalty",
                 "1.2",
+                "--no-repeat-ngram-size",
+                "4",
                 "--torch-dtype",
                 "float16",
             ]
@@ -133,6 +137,7 @@ class InferenceItTest(unittest.TestCase):
         self.assertEqual(args.top_p, 0.8)
         self.assertEqual(args.top_k, 32)
         self.assertEqual(args.repetition_penalty, 1.2)
+        self.assertEqual(args.no_repeat_ngram_size, 4)
         self.assertEqual(args.torch_dtype, "float16")
 
     def test_parse_args_rejects_invalid_top_p(self) -> None:

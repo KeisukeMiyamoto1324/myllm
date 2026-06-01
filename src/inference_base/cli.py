@@ -50,12 +50,13 @@ def parse_args(default_model_dir: Path) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", type=str, default=str(default_model_dir))
     parser.add_argument("--prompt", "--promot", type=str, default="")
-    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-new-tokens", type=int, default=96)
     parser.add_argument("--do-sample", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--temperature", type=positive_float, default=0.7)
-    parser.add_argument("--top-p", type=probability_float, default=0.9)
-    parser.add_argument("--top-k", type=non_negative_int, default=32)
-    parser.add_argument("--repetition-penalty", type=positive_float, default=1.05)
+    parser.add_argument("--temperature", type=positive_float, default=0.6)
+    parser.add_argument("--top-p", type=probability_float, default=0.85)
+    parser.add_argument("--top-k", type=non_negative_int, default=40)
+    parser.add_argument("--repetition-penalty", type=positive_float, default=1.2)
+    parser.add_argument("--no-repeat-ngram-size", type=non_negative_int, default=3)
     parser.add_argument(
         "--torch-dtype",
         choices=["auto", "float16", "bfloat16", "float32"],
