@@ -79,12 +79,13 @@ def push_hf_pretrained_artifacts(
     repo_id: str,
     private: bool,
     commit_message: str,
+    token: str | None = None,
 ) -> None:
     # ---------------------------------------------------------
     # Create or reuse the model repository, then upload only the
     # portable inference artifacts and skip local training outputs.
     # ---------------------------------------------------------
-    api = HfApi()
+    api = HfApi(token=token)
     api.create_repo(
         repo_id=repo_id,
         private=private,
