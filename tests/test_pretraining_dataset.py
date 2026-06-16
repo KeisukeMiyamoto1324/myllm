@@ -92,6 +92,13 @@ class FakeStreamingDataset:
             samples=[sample for sample in self.samples if predicate(sample)]
         )
 
+    def shard(self, num_shards: int, index: int) -> "FakeStreamingDataset":
+        # ---------------------------------------------------------
+        # Return one deterministic worker shard so streaming worker
+        # partitioning can be tested without remote datasets.
+        # ---------------------------------------------------------
+        return FakeStreamingDataset(samples=self.samples[index::num_shards])
+
     def __iter__(self) -> Iterator[dict[str, str]]:
         # ---------------------------------------------------------
         # Yield samples one by one like a streaming dataset.
@@ -344,6 +351,37 @@ class PretrainingDatasetTest(unittest.TestCase):
         )
         self.assertTrue(dataset._contains_allowed_url(sample={"url": "not-a-url"}))
         self.assertTrue(dataset._contains_allowed_url(sample={}))
+
+    def test_pretraining_corpus_shards_streaming_dataset_by_worker(self) -> None:
+        # ---------------------------------------------------------
+        # Read only the current worker shard so parallel workers do
+        # not replay the same streaming samples.
+        # ---------------------------------------------------------
+        corpus_case = build_case(name="custom", token_percentage=100.0)
+        dataset = PretrainingCorpusDataset(
+            corpus_case=corpus_case,
+            tokenizer=FixedTokenizer(),
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        fake_dataset = FakeStreamingDataset(
+            samples=[
+                {"text": "10"},
+                {"text": "20"},
+                {"text": "30"},
+                {"text": "40"},
+            ]
+        )
+        worker_info = type("WorkerInfo", (), {"num_workers": 2, "id": 1})()
+
+        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
+            with patch("src.pretraining.dataset.get_worker_info", return_value=worker_info):
+                examples = list(iter(dataset))
+
+        input_token_ids = [example[0][1].item() for example in examples]
+        self.assertEqual(sorted(input_token_ids), [20, 40])
 
     def test_pretraining_corpus_bucket_packs_best_fit_documents(self) -> None:
         # ---------------------------------------------------------

@@ -60,6 +60,15 @@ class PretrainingCorpusDataset(IterableDataset[PretrainingExample]):
         )
 
         # ---------------------------------------------------------
+        # Split the streaming source across DataLoader workers so
+        # workers do not replay the same remote samples.
+        # ---------------------------------------------------------
+        worker_info = get_worker_info()
+
+        if worker_info is not None:
+            dataset = dataset.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+
+        # ---------------------------------------------------------
         # Route each streamed document through corpus-specific URL
         # exclusions and the deterministic train-validation split.
         # ---------------------------------------------------------
