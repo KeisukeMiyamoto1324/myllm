@@ -20,6 +20,12 @@ class FakeTokenizer:
     bos_token = "|<bos>|"
     eos_token = "|<eos>|"
 
+    def get_vocab_size(self) -> int:
+        # ---------------------------------------------------------
+        # Match the saved test model vocabulary size.
+        # ---------------------------------------------------------
+        return 12
+
     def token_to_id(self, token: str) -> int:
         # ---------------------------------------------------------
         # Return stable ids for the special tokens needed by model
@@ -31,34 +37,6 @@ class FakeTokenizer:
             self.eos_token: 2,
         }
         return token_ids[token]
-
-
-class FakeConfig:
-    vocab_size = 12
-    max_len = 16
-    d_model = 8
-    num_layers = 4
-    num_heads = 2
-    d_ff = 16
-
-
-class FakeHfModel:
-    def __init__(self) -> None:
-        # ---------------------------------------------------------
-        # Provide the same attributes used by load_base_model while
-        # keeping the test model small.
-        # ---------------------------------------------------------
-        self.config = FakeConfig()
-        self.transformer = DecoderOnlyTransformer(
-            num_tokens=self.config.vocab_size,
-            d_model=self.config.d_model,
-            max_len=self.config.max_len,
-            num_layers=self.config.num_layers,
-            num_heads=self.config.num_heads,
-            d_ff=self.config.d_ff,
-            pad_token_id=0,
-        )
-
 
 class PosttrainingModelSetupTest(unittest.TestCase):
     def test_parse_args_uses_lambda_hub_model_default(self) -> None:
@@ -108,15 +86,43 @@ class PosttrainingModelSetupTest(unittest.TestCase):
         self.assertTrue(all(parameter.requires_grad for parameter in model.parameters()))
         self.assertEqual(optimizer_parameter_ids, model_parameter_ids)
 
-    def test_load_base_model_copies_hub_weights_and_trains_all_layers(self) -> None:
+    def test_load_base_model_loads_pytorch_weights_and_trains_all_layers(self) -> None:
         # ---------------------------------------------------------
-        # Load Hub weights into the local Lightning model and return
-        # metadata for the downloaded architecture.
+        # Load PyTorch weights into the local Lightning model and
+        # return metadata for the downloaded architecture.
         # ---------------------------------------------------------
-        with patch("src.posttraining.model_setup.AutoModelForCausalLM.from_pretrained", return_value=FakeHfModel()):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir)
+            model = DecoderOnlyTransformer(
+                num_tokens=12,
+                d_model=8,
+                max_len=16,
+                num_layers=4,
+                num_heads=2,
+                d_ff=16,
+                pad_token_id=0,
+            )
+            torch.save(model.state_dict(), model_dir / "model.pth")
+            (model_dir / "model_config.json").write_text(
+                json.dumps(
+                    {
+                        "max_len": 16,
+                        "d_model": 8,
+                        "num_layers": 4,
+                        "num_heads": 2,
+                        "d_ff": 16,
+                        "learning_rate": 5e-5,
+                        "pad_token_id": 0,
+                        "bos_token_id": 1,
+                        "eos_token_id": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
             with patch("src.posttraining.model_setup.resolve_device", return_value=torch.device("cpu")):
-                model, model_config = load_base_model(
-                    base_model_dir=Path("/tmp/model"),
+                loaded_model, model_config = load_base_model(
+                    base_model_dir=model_dir,
                     tokenizer=FakeTokenizer(),
                     learning_rate=5e-5,
                     max_len=8,
@@ -125,12 +131,12 @@ class PosttrainingModelSetupTest(unittest.TestCase):
 
         self.assertEqual(model_config["max_len"], 16)
         self.assertEqual(model_config["num_layers"], 4)
-        self.assertTrue(all(parameter.requires_grad for parameter in model.parameters()))
+        self.assertTrue(all(parameter.requires_grad for parameter in loaded_model.parameters()))
 
-    def test_save_chat_model_persists_hf_metadata(self) -> None:
+    def test_save_chat_model_persists_pytorch_metadata(self) -> None:
         # ---------------------------------------------------------
-        # Save legacy metadata and call the HF artifact writer with
-        # trainable layer provenance included.
+        # Save PyTorch metadata with trainable layer provenance
+        # included without extra converted artifacts.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             model_dir = Path(temp_dir)
@@ -162,26 +168,24 @@ class PosttrainingModelSetupTest(unittest.TestCase):
                 "eos_token_id": 2,
             }
 
-            with patch("src.posttraining.artifacts.save_hf_pretrained_artifacts") as mocked_save:
-                with patch("src.posttraining.artifacts.copy_inference_code") as mocked_copy:
-                    save_chat_model(
-                        model=model,
-                        model_dir=model_dir,
-                        model_config=model_config,
-                        args=args,
-                        pad_token_id=0,
-                        bos_token_id=1,
-                        eos_token_id=2,
-                        end_of_turn_token_id=11,
-                    )
+            save_chat_model(
+                model=model,
+                model_dir=model_dir,
+                model_config=model_config,
+                args=args,
+                pad_token_id=0,
+                bos_token_id=1,
+                eos_token_id=2,
+                end_of_turn_token_id=11,
+            )
 
             payload = json.loads((model_dir / "model_config.json").read_text())
+            model_path_exists = (model_dir / "model.pth").is_file()
 
         self.assertEqual(payload["base_model_id"], DEFAULT_BASE_MODEL_ID)
         self.assertEqual(payload["training_max_len"], 8)
         self.assertEqual(payload["trainable_layers"], "all")
-        mocked_save.assert_called_once()
-        mocked_copy.assert_called_once()
+        self.assertTrue(model_path_exists)
 
 
 if __name__ == "__main__":

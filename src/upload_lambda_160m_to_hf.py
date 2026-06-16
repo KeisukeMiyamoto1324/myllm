@@ -6,8 +6,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.pretraining.hf_artifacts import copy_inference_code
-from src.pretraining.hf_artifacts import push_hf_pretrained_artifacts
+from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
 
 
 def main() -> None:
@@ -22,16 +21,10 @@ def main() -> None:
     model_dir = Path("models/lambda-160m")
 
     # ---------------------------------------------------------
-    # Refresh remote-code files before upload so Hub inference uses
-    # the latest model wrapper implementation.
+    # Push only PyTorch weights, model config, and tokenizer files.
+    # Python source files and training outputs are skipped.
     # ---------------------------------------------------------
-    copy_inference_code(output_path=model_dir)
-
-    # ---------------------------------------------------------
-    # Push only portable inference artifacts to Hugging Face.
-    # Checkpoints, metrics, and validation cache files are skipped.
-    # ---------------------------------------------------------
-    push_hf_pretrained_artifacts(
+    push_pytorch_model_artifacts(
         output_path=model_dir,
         repo_id=hf_repo,
         private=True,

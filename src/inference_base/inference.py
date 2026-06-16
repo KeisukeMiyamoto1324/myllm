@@ -14,8 +14,8 @@ from src.inference_base.runtime import run_inference
 
 def main() -> None:
     # ---------------------------------------------------------
-    # Parse runtime settings and load Hugging Face-compatible
-    # artifacts from a local directory or Hub repository id.
+    # Parse runtime settings and load PyTorch artifacts from a
+    # local directory or Hub repository id.
     # ---------------------------------------------------------
     args = parse_args(default_model_dir=PROJECT_ROOT / "models" / "lambda-160m")
     run_inference(args=args)

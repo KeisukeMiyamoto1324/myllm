@@ -5,27 +5,18 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch.nn as nn
 
 from src.inference_base.cli import parse_args
 from src.inference_base.generation import generate_continuation_text
+from src.inference_base.generation import generate_token_ids
 from src.inference_base.generation import resolve_torch_dtype
-
-
-class FakeBatch(dict[str, torch.Tensor]):
-    def to(self, device: torch.device) -> "FakeBatch":
-        # ---------------------------------------------------------
-        # Match the Transformers BatchEncoding interface needed by
-        # inference while keeping tests independent of tokenizers.
-        # ---------------------------------------------------------
-        del device
-        return self
+from src.pretraining.kv_cache import KeyValueCache
 
 
 class FakeTokenizer:
     bos_token = "|<bos>|"
-    bos_token_id = 1
-    eos_token_id = 2
-    pad_token_id = 0
+    eos_token = "|<eos>|"
 
     def __init__(self) -> None:
         # ---------------------------------------------------------
@@ -34,65 +25,75 @@ class FakeTokenizer:
         # ---------------------------------------------------------
         self.decoded_ids: list[int] = []
 
-    def __call__(
-        self,
-        prompt: str,
-        return_tensors: str,
-        add_special_tokens: bool,
-    ) -> FakeBatch:
+    def token_to_id(self, token: str) -> int:
         # ---------------------------------------------------------
-        # Return a fixed prompt length so tests can verify only new
-        # generated ids are decoded.
+        # Return stable ids for generation special tokens.
         # ---------------------------------------------------------
-        self.prompt = prompt
-        self.return_tensors = return_tensors
-        self.add_special_tokens = add_special_tokens
-        return FakeBatch({"input_ids": torch.tensor([[1, 10, 11, 12]], dtype=torch.long)})
+        token_ids = {
+            self.bos_token: 1,
+            self.eos_token: 2,
+        }
+        return token_ids[token]
 
-    def decode(self, token_ids: torch.Tensor, skip_special_tokens: bool) -> str:
+    def tokenize(self, sentence: str) -> list[int]:
         # ---------------------------------------------------------
-        # Decode receives only the generated suffix after prompt ids
-        # are removed by the helper.
+        # Return a fixed prompt so tests can verify continuation
+        # decoding receives only newly generated ids.
         # ---------------------------------------------------------
-        self.decoded_ids = [int(token_id) for token_id in token_ids.tolist()]
-        self.skip_special_tokens = skip_special_tokens
+        self.prompt = sentence
+        return [10, 11, 12]
+
+    def detokenize(self, token_ids: list[int]) -> str:
+        # ---------------------------------------------------------
+        # Decode receives only the generated suffix from the helper.
+        # ---------------------------------------------------------
+        self.decoded_ids = token_ids
         return " continuation text "
 
 
-class FakeModel:
-    def __init__(self) -> None:
-        # ---------------------------------------------------------
-        # Expose a device attribute and capture generation kwargs in
-        # the same shape as a Transformers model.
-        # ---------------------------------------------------------
-        self.device = torch.device("cpu")
-        self.generate_kwargs: dict[str, object] = {}
+class FakeModel(nn.Module):
+    def __init__(self, next_token_ids: list[int]) -> None:
+        super().__init__()
 
-    def generate(self, **kwargs: object) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Return prompt ids plus two generated ids so helper slicing
-        # can be tested without loading a real model.
+        # Keep one parameter for device resolution and return fixed
+        # next-token logits for each generation step.
         # ---------------------------------------------------------
-        self.generate_kwargs = kwargs
-        input_ids = kwargs["input_ids"]
-        generated_ids = torch.tensor([[13, 14]], dtype=torch.long)
-        return torch.cat([input_ids, generated_ids], dim=1)
+        self.probe = nn.Parameter(torch.zeros(1))
+        self.next_token_ids = next_token_ids
+        self.calls: list[list[int]] = []
+
+    def forward_with_cache(
+        self,
+        token_ids: torch.Tensor,
+        past_key_values: KeyValueCache | None,
+    ) -> tuple[torch.Tensor, KeyValueCache]:
+        # ---------------------------------------------------------
+        # Emit logits that greedily select the configured token id
+        # while recording each input passed by generation.
+        # ---------------------------------------------------------
+        del past_key_values
+        self.calls.append([int(token_id) for token_id in token_ids[0].tolist()])
+        token_id = self.next_token_ids[len(self.calls) - 1]
+        logits = torch.zeros((1, token_ids.size(dim=1), 16), dtype=torch.float32)
+        logits[0, -1, token_id] = 100.0
+        return logits, []
 
 
 class InferenceItTest(unittest.TestCase):
-    def test_generate_continuation_text_uses_hf_generate(self) -> None:
+    def test_generate_continuation_text_uses_pytorch_cache_generation(self) -> None:
         # ---------------------------------------------------------
-        # Verify inference delegates direct prompt continuation to
-        # the model and decodes only newly generated tokens.
+        # Verify direct prompt continuation uses the PyTorch cache
+        # path and decodes only newly generated tokens.
         # ---------------------------------------------------------
-        model = FakeModel()
+        model = FakeModel(next_token_ids=[13, 14])
         tokenizer = FakeTokenizer()
         text = generate_continuation_text(
             model=model,
             tokenizer=tokenizer,
             prompt="prompt",
-            max_new_tokens=8,
-            do_sample=True,
+            max_new_tokens=2,
+            do_sample=False,
             temperature=0.7,
             top_p=0.9,
             top_k=40,
@@ -101,24 +102,36 @@ class InferenceItTest(unittest.TestCase):
         )
 
         self.assertEqual(text, "continuation text")
-        self.assertEqual(tokenizer.prompt, "|<bos>|prompt")
-        self.assertEqual(tokenizer.add_special_tokens, False)
+        self.assertEqual(tokenizer.prompt, "prompt")
         self.assertEqual(tokenizer.decoded_ids, [13, 14])
-        self.assertEqual(model.generate_kwargs["input_ids"].tolist(), [[1, 10, 11, 12]])
-        self.assertEqual(model.generate_kwargs["max_new_tokens"], 8)
-        self.assertEqual(model.generate_kwargs["do_sample"], True)
-        self.assertEqual(model.generate_kwargs["temperature"], 0.7)
-        self.assertEqual(model.generate_kwargs["top_p"], 0.9)
-        self.assertEqual(model.generate_kwargs["top_k"], 40)
-        self.assertEqual(model.generate_kwargs["repetition_penalty"], 1.05)
-        self.assertEqual(model.generate_kwargs["no_repeat_ngram_size"], 3)
-        self.assertEqual(model.generate_kwargs["eos_token_id"], 2)
-        self.assertEqual(model.generate_kwargs["pad_token_id"], 0)
+        self.assertEqual(model.calls, [[1, 10, 11, 12], [13]])
 
-    def test_parse_args_uses_hf_generation_defaults(self) -> None:
+    def test_generate_token_ids_stops_on_eos(self) -> None:
         # ---------------------------------------------------------
-        # Keep instruction inference defaults aligned with the new
-        # AutoModel generate path.
+        # Stop generation as soon as EOS is selected so the caller
+        # does not produce extra tokens.
+        # ---------------------------------------------------------
+        model = FakeModel(next_token_ids=[13, 2, 14])
+        input_ids = torch.tensor([[1, 10]], dtype=torch.long)
+        generated_ids = generate_token_ids(
+            model=model,
+            input_ids=input_ids,
+            max_new_tokens=8,
+            do_sample=False,
+            temperature=1.0,
+            top_p=1.0,
+            top_k=0,
+            repetition_penalty=1.0,
+            no_repeat_ngram_size=0,
+            eos_token_id=2,
+        )
+
+        self.assertEqual(generated_ids, [13, 2])
+
+    def test_parse_args_uses_pytorch_generation_defaults(self) -> None:
+        # ---------------------------------------------------------
+        # Keep instruction inference defaults aligned with the
+        # native PyTorch generation path.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             argv = [
@@ -169,10 +182,10 @@ class InferenceItTest(unittest.TestCase):
 
     def test_resolve_torch_dtype_maps_cli_values(self) -> None:
         # ---------------------------------------------------------
-        # Convert dtype CLI names into the values passed to
-        # AutoModelForCausalLM.from_pretrained.
+        # Convert dtype CLI names into values used by PyTorch model
+        # casting.
         # ---------------------------------------------------------
-        self.assertEqual(resolve_torch_dtype("auto"), "auto")
+        self.assertIsNone(resolve_torch_dtype("auto"))
         self.assertEqual(resolve_torch_dtype("float16"), torch.float16)
         self.assertEqual(resolve_torch_dtype("bfloat16"), torch.bfloat16)
         self.assertEqual(resolve_torch_dtype("float32"), torch.float32)

@@ -1,27 +1,31 @@
 import argparse
 
-from transformers import AutoModelForCausalLM
-from transformers import AutoTokenizer
-
 from src.inference_base.generation import generate_continuation_text
 from src.inference_base.generation import resolve_torch_dtype
+from src.pretraining.device_utils import resolve_device
+from src.pretraining.pytorch_artifacts import load_pytorch_model
+from src.pretraining.pytorch_artifacts import resolve_model_dir
+from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 def run_inference(args: argparse.Namespace) -> None:
     # ---------------------------------------------------------
-    # Load Hugging Face-compatible tokenizer and model artifacts
-    # from either a local directory or Hub repository id.
+    # Resolve a local directory or Hub repo id, then load tokenizer
+    # and PyTorch model artifacts directly.
     # ---------------------------------------------------------
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.model_dir,
-        trust_remote_code=True,
+    model_dir = resolve_model_dir(model_source=args.model_dir)
+    tokenizer = ByteLevelBPE.load(model_dir)
+    model, _ = load_pytorch_model(
+        model_dir=model_dir,
+        vocab_size=tokenizer.get_vocab_size(),
     )
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
-        trust_remote_code=True,
-        device_map="auto",
-        dtype=resolve_torch_dtype(torch_dtype=args.torch_dtype),
-    )
+    device = resolve_device()
+    torch_dtype = resolve_torch_dtype(torch_dtype=args.torch_dtype)
+    model = model.to(device=device)
+
+    if torch_dtype is not None:
+        model = model.to(dtype=torch_dtype)
+
     model.eval()
 
     # ---------------------------------------------------------
@@ -34,8 +38,8 @@ def run_inference(args: argparse.Namespace) -> None:
         user_text = input("user> ").strip()
 
     # ---------------------------------------------------------
-    # Generate a continuation using the shared generation settings
-    # parsed by the inference CLI.
+    # Generate a continuation using the native PyTorch generation
+    # settings parsed by the inference CLI.
     # ---------------------------------------------------------
     generated_text = generate_continuation_text(
         model=model,

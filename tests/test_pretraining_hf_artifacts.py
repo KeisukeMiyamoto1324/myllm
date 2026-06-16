@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -5,22 +6,17 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import torch
-from transformers import AutoConfig
-from transformers import AutoModel
-from transformers import AutoModelForCausalLM
 
-from src.pretraining.configuration_myllm import MyLLMConfig
-from src.pretraining.hf_artifacts import copy_inference_code
-from src.pretraining.hf_artifacts import push_hf_pretrained_artifacts
-from src.pretraining.hf_artifacts import save_hf_pretrained_artifacts
-from src.pretraining.modeling_myllm import MyLLMForCausalLM
+from src.pretraining.pytorch_artifacts import build_model_from_config
+from src.pretraining.pytorch_artifacts import load_pytorch_model
+from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
 from src.pretraining.transformer import DecoderOnlyTransformer
 
 
 def build_model_config() -> dict[str, int | float]:
     # ---------------------------------------------------------
-    # Build a compact model config shared by the HF artifact tests
-    # so local AutoModel loading stays fast.
+    # Build a compact model config shared by PyTorch artifact tests
+    # so direct model loading stays fast.
     # ---------------------------------------------------------
     return {
         "max_len": 16,
@@ -35,70 +31,25 @@ def build_model_config() -> dict[str, int | float]:
     }
 
 
-class PretrainingHfArtifactsTest(unittest.TestCase):
-    def test_config_round_trips_with_auto_config(self) -> None:
+class PretrainingPytorchArtifactsTest(unittest.TestCase):
+    def test_build_model_from_config_recreates_transformer(self) -> None:
         # ---------------------------------------------------------
-        # Save the custom config with AutoClass metadata and load it
-        # through the same trust_remote_code path used from Hub.
+        # Rebuild the native PyTorch architecture directly from the
+        # saved config values without any wrapper class.
         # ---------------------------------------------------------
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir)
-            MyLLMConfig.register_for_auto_class()
-            config = MyLLMConfig(
-                vocab_size=12,
-                max_len=16,
-                d_model=8,
-                num_layers=2,
-                num_heads=2,
-                d_ff=16,
-                pad_token_id=0,
-                bos_token_id=1,
-                eos_token_id=2,
-            )
-            config.save_pretrained(output_path)
-            copy_inference_code(output_path=output_path)
-
-            loaded_config = AutoConfig.from_pretrained(
-                output_path,
-                trust_remote_code=True,
-            )
-
-        self.assertEqual(loaded_config.model_type, "myllm")
-        self.assertEqual(loaded_config.vocab_size, 12)
-        self.assertEqual(loaded_config.num_hidden_layers, 2)
-
-    def test_model_forward_returns_causal_lm_output(self) -> None:
-        # ---------------------------------------------------------
-        # Verify the HF wrapper delegates to the PyTorch model while
-        # returning the standard causal LM output fields.
-        # ---------------------------------------------------------
-        config = MyLLMConfig(
+        model = build_model_from_config(
+            model_config=build_model_config(),
             vocab_size=12,
-            max_len=16,
-            d_model=8,
-            num_layers=2,
-            num_heads=2,
-            d_ff=16,
-            pad_token_id=0,
-            bos_token_id=1,
-            eos_token_id=2,
-        )
-        model = MyLLMForCausalLM(config=config)
-        input_ids = torch.tensor([[1, 3, 4]], dtype=torch.long)
-        attention_mask = torch.ones_like(input_ids)
-        output = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=input_ids,
         )
 
-        self.assertEqual(tuple(output.logits.shape), (1, 3, 12))
-        self.assertIsNotNone(output.loss)
+        self.assertEqual(model.we.num_embeddings, 12)
+        self.assertEqual(model.we.embedding_dim, 8)
+        self.assertEqual(len(model.blocks), 2)
 
-    def test_saved_model_loads_with_auto_model_and_generates(self) -> None:
+    def test_load_pytorch_model_restores_state_dict(self) -> None:
         # ---------------------------------------------------------
-        # Save trained-style artifacts and load them through the
-        # public AutoModelForCausalLM trust_remote_code interface.
+        # Save model.pth and model_config.json, then verify direct
+        # PyTorch loading restores the same weights.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir)
@@ -111,35 +62,21 @@ class PretrainingHfArtifactsTest(unittest.TestCase):
                 d_ff=16,
                 pad_token_id=0,
             )
-            save_hf_pretrained_artifacts(
-                model=model,
-                model_config=build_model_config(),
+            torch.save(model.state_dict(), output_path / "model.pth")
+            (output_path / "model_config.json").write_text(
+                json.dumps(build_model_config()),
+                encoding="utf-8",
+            )
+
+            loaded_model, loaded_config = load_pytorch_model(
+                model_dir=output_path,
                 vocab_size=12,
-                output_path=output_path,
-            )
-            copy_inference_code(output_path=output_path)
-
-            loaded_model = AutoModelForCausalLM.from_pretrained(
-                output_path,
-                trust_remote_code=True,
-            )
-            generic_model = AutoModel.from_pretrained(
-                output_path,
-                trust_remote_code=True,
-            )
-            input_ids = torch.tensor([[1, 3, 4]], dtype=torch.long)
-            output_ids = loaded_model.generate(
-                input_ids=input_ids,
-                max_new_tokens=2,
-                do_sample=False,
-                pad_token_id=0,
-                eos_token_id=2,
             )
 
-        self.assertEqual(tuple(output_ids.shape), (1, 5))
-        self.assertEqual(generic_model.__class__.__name__, "MyLLMForCausalLM")
+        self.assertEqual(loaded_config["max_len"], 16)
+        self.assertTrue(torch.equal(model.we.weight, loaded_model.we.weight))
 
-    def test_push_uses_hub_model_repo_and_ignores_training_outputs(self) -> None:
+    def test_push_uses_hub_model_repo_and_only_allows_artifacts(self) -> None:
         # ---------------------------------------------------------
         # Mock the Hub client so publishing behavior is verified
         # without requiring credentials or network access.
@@ -148,8 +85,8 @@ class PretrainingHfArtifactsTest(unittest.TestCase):
             output_path = Path(temp_dir)
             api = MagicMock()
 
-            with patch("src.pretraining.hf_artifacts.HfApi", return_value=api):
-                push_hf_pretrained_artifacts(
+            with patch("src.pretraining.pytorch_artifacts.HfApi", return_value=api):
+                push_pytorch_model_artifacts(
                     output_path=output_path,
                     repo_id="user/myllm",
                     private=True,
@@ -167,7 +104,16 @@ class PretrainingHfArtifactsTest(unittest.TestCase):
             repo_type="model",
             folder_path=output_path,
             commit_message="upload",
+            allow_patterns=[
+                "model.pth",
+                "model_config.json",
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "special_tokens_map.json",
+                "added_tokens.json",
+            ],
             ignore_patterns=[
+                "*.py",
                 "checkpoints/*",
                 "metrics/*",
                 "validation-cache-*",

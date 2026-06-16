@@ -9,8 +9,6 @@ from src.posttraining.dataset import EVERYDAY_TRAIN_SPLIT
 from src.posttraining.dataset import EVERYDAY_VALIDATION_SPLIT
 from src.posttraining.dataset import MAGPIE_DATASET_PATH
 from src.posttraining.dataset import MAGPIE_DATASET_SPLIT
-from src.pretraining.hf_artifacts import copy_inference_code
-from src.pretraining.hf_artifacts import save_hf_pretrained_artifacts
 from src.pretraining.transformer import DecoderOnlyTransformer
 
 
@@ -56,15 +54,3 @@ def save_chat_model(
 
     with open(model_dir / "model_config.json", "w") as f:
         json.dump(payload, f)
-
-    # ---------------------------------------------------------
-    # Save portable Hugging Face artifacts so the fine-tuned model
-    # can be loaded with AutoModelForCausalLM.
-    # ---------------------------------------------------------
-    save_hf_pretrained_artifacts(
-        model=model,
-        model_config=payload,
-        vocab_size=model.we.num_embeddings,
-        output_path=model_dir,
-    )
-    copy_inference_code(output_path=model_dir)

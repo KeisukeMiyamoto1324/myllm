@@ -44,8 +44,7 @@ def non_negative_int(value: str) -> int:
 def parse_args(default_model_dir: Path) -> argparse.Namespace:
     # ---------------------------------------------------------
     # Define CLI arguments for an interactive text generation session
-    # backed by a Hugging Face AutoModel-compatible model directory
-    # or repo.
+    # backed by a PyTorch model directory or Hub repo.
     # ---------------------------------------------------------
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", type=str, default=str(default_model_dir))

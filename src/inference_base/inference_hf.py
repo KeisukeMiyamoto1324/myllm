@@ -18,7 +18,7 @@ from src.inference_base.runtime import run_inference
 def main() -> None:
     # ---------------------------------------------------------
     # Load the Hub repository id from .env and use it as the
-    # default model source for inference.
+    # default PyTorch model source for inference.
     # ---------------------------------------------------------
     load_dotenv()
 

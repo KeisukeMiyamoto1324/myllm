@@ -18,9 +18,7 @@ from src.pretraining.dataset import LocalTokenizedDataset
 from src.pretraining.dataset import MixedPretrainingDataset
 from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.device_utils import resolve_accelerator, resolve_precision
-from src.pretraining.hf_artifacts import copy_inference_code
-from src.pretraining.hf_artifacts import push_hf_pretrained_artifacts
-from src.pretraining.hf_artifacts import save_hf_pretrained_artifacts
+from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
 from src.pretraining.training_corpus_cases import WIKI_RAMP_START_PROGRESS
@@ -457,25 +455,18 @@ def main() -> None:
         json.dump(model_config, f)
 
     # ---------------------------------------------------------
-    # Save the tokenizer beside the model so the model directory
-    # can be loaded directly by AutoTokenizer.from_pretrained.
+    # Save the tokenizer beside the model so PyTorch-only inference
+    # can load token ids without rebuilding the tokenizer.
     # ---------------------------------------------------------
     tokenizer.save_pretrained(path=model_dir)
 
     # ---------------------------------------------------------
-    # Save Transformers AutoModel artifacts beside the legacy files
-    # and optionally publish the portable inference folder to Hub.
     # ---------------------------------------------------------
-    save_hf_pretrained_artifacts(
-        model=model,
-        model_config=model_config,
-        vocab_size=tokenizer.get_vocab_size(),
-        output_path=model_dir,
-    )
-    copy_inference_code(output_path=model_dir)
-
+    # Optionally publish only the PyTorch model artifacts and
+    # tokenizer files. Python source files are not uploaded.
+    # ---------------------------------------------------------
     if args.push_to_hub:
-        push_hf_pretrained_artifacts(
+        push_pytorch_model_artifacts(
             output_path=model_dir,
             repo_id=os.environ["HF_REPO"],
             private=True,

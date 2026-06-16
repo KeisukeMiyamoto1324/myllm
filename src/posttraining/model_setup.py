@@ -1,9 +1,9 @@
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
-from transformers import AutoModelForCausalLM
 
 from src.pretraining.device_utils import resolve_device
+from src.pretraining.pytorch_artifacts import load_pytorch_model
 from src.pretraining.transformer import DecoderOnlyTransformer
 from src.tokenizer.tokenizer import ByteLevelBPE
 
@@ -62,25 +62,15 @@ def load_base_model(
     accelerator: str,
 ) -> tuple[DecoderOnlyTransformer, dict[str, int | float]]:
     # ---------------------------------------------------------
-    # Load the Hugging Face model, copy its weights into the local
-    # Lightning model, and prepare every layer for fine tuning.
+    # Load PyTorch model artifacts directly and prepare every layer
+    # for fine tuning without a model wrapper.
     # ---------------------------------------------------------
-    hf_model = AutoModelForCausalLM.from_pretrained(
-        base_model_dir,
-        trust_remote_code=True,
-        device_map=None,
-    )
-    model = DecoderOnlyTransformer(
-        num_tokens=hf_model.config.vocab_size,
-        d_model=hf_model.config.d_model,
-        max_len=hf_model.config.max_len,
-        num_layers=hf_model.config.num_layers,
-        num_heads=hf_model.config.num_heads,
-        d_ff=hf_model.config.d_ff,
+    model, _ = load_pytorch_model(
+        model_dir=base_model_dir,
+        vocab_size=tokenizer.get_vocab_size(),
         learning_rate=learning_rate,
-        pad_token_id=tokenizer.token_to_id(tokenizer.pad_token),
+        use_fused_optimizer=accelerator == "cuda",
     )
-    model.load_state_dict(hf_model.transformer.state_dict())
     model = model.to(resolve_device())
     model.learning_rate = learning_rate
     model.use_fused_optimizer = accelerator == "cuda"
