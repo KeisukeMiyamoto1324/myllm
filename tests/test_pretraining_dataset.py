@@ -345,10 +345,10 @@ class PretrainingDatasetTest(unittest.TestCase):
         self.assertTrue(dataset._contains_allowed_url(sample={"url": "not-a-url"}))
         self.assertTrue(dataset._contains_allowed_url(sample={}))
 
-    def test_pretraining_corpus_packs_short_documents(self) -> None:
+    def test_pretraining_corpus_bucket_packs_best_fit_documents(self) -> None:
         # ---------------------------------------------------------
-        # Pack adjacent short documents into one context window while
-        # resetting positions and segment ids at each document.
+        # Pack short documents by best fit so equal-length segments
+        # can fill the context window without padding.
         # ---------------------------------------------------------
         corpus_case = build_case(name="custom", token_percentage=100.0)
         dataset = PretrainingCorpusDataset(
@@ -370,10 +370,41 @@ class PretrainingDatasetTest(unittest.TestCase):
         with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
             input_ids, label_ids, position_ids, segment_ids = next(iter(dataset))
 
-        self.assertEqual(input_ids.tolist(), [1, 10, 11, 1, 20, 0])
-        self.assertEqual(label_ids.tolist(), [10, 11, 2, 20, 2, 0])
-        self.assertEqual(position_ids.tolist(), [0, 1, 2, 0, 1, 0])
-        self.assertEqual(segment_ids.tolist(), [0, 0, 0, 1, 1, -1])
+        self.assertEqual(input_ids.tolist(), [1, 10, 11, 1, 30, 31])
+        self.assertEqual(label_ids.tolist(), [10, 11, 2, 30, 31, 2])
+        self.assertEqual(position_ids.tolist(), [0, 1, 2, 0, 1, 2])
+        self.assertEqual(segment_ids.tolist(), [0, 0, 0, 1, 1, 1])
+
+    def test_pretraining_corpus_bucket_packs_remaining_segments(self) -> None:
+        # ---------------------------------------------------------
+        # Flush all buffered segments at stream end so short leftover
+        # documents are still emitted as padded packed samples.
+        # ---------------------------------------------------------
+        corpus_case = build_case(name="custom", token_percentage=100.0)
+        dataset = PretrainingCorpusDataset(
+            corpus_case=corpus_case,
+            tokenizer=FixedTokenizer(),
+            max_len=6,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        fake_dataset = FakeStreamingDataset(
+            samples=[
+                {"text": "10 11"},
+                {"text": "20"},
+                {"text": "30 31"},
+            ]
+        )
+
+        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
+            examples = list(iter(dataset))
+
+        input_ids, label_ids, position_ids, segment_ids = examples[1]
+        self.assertEqual(input_ids.tolist(), [1, 20, 0, 0, 0, 0])
+        self.assertEqual(label_ids.tolist(), [20, 2, 0, 0, 0, 0])
+        self.assertEqual(position_ids.tolist(), [0, 1, 0, 0, 0, 0])
+        self.assertEqual(segment_ids.tolist(), [0, 0, -1, -1, -1, -1])
 
     def test_pretraining_corpus_splits_oversized_documents(self) -> None:
         # ---------------------------------------------------------

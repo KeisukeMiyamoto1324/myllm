@@ -15,6 +15,9 @@ from src.tokenizer.tokenizer import ByteLevelBPE
 
 
 PretrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+PretrainingSegment = tuple[list[int], list[int], int]
+BUCKET_PACKING_BUFFER_SEGMENTS = 4096
+BUCKET_PACKING_SEED = 17
 
 
 class PretrainingCorpusDataset(IterableDataset[PretrainingExample]):
@@ -66,60 +69,26 @@ class PretrainingCorpusDataset(IterableDataset[PretrainingExample]):
             )
         )
 
-        pending_input_ids: list[int] = []
-        pending_label_ids: list[int] = []
-        pending_position_ids: list[int] = []
-        pending_segment_ids: list[int] = []
-        next_segment_id = 0
+        segment_buffer: list[PretrainingSegment] = []
+        segment_index = 0
 
         for sample in dataset:
             # ---------------------------------------------------------
-            # Tokenize documents into independent segments, then pack
-            # adjacent segments until the context window is full.
+            # Tokenize documents into independent segments and keep a
+            # bounded local buffer for deterministic best-fit packing.
             # ---------------------------------------------------------
             for input_token_ids, label_token_ids in self._create_segments(
                 text=sample[self.corpus_case.text_column]
             ):
-                if len(pending_input_ids) + len(input_token_ids) > self.max_len:
-                    yield self._build_example(
-                        input_token_ids=pending_input_ids,
-                        label_token_ids=pending_label_ids,
-                        position_ids=pending_position_ids,
-                        segment_ids=pending_segment_ids,
-                    )
-                    pending_input_ids = []
-                    pending_label_ids = []
-                    pending_position_ids = []
-                    pending_segment_ids = []
-                    next_segment_id = 0
+                order_key = self._resolve_segment_order_key(segment_index=segment_index)
+                segment_buffer.append((input_token_ids, label_token_ids, order_key))
+                segment_index += 1
 
-                segment_len = len(input_token_ids)
-                pending_input_ids.extend(input_token_ids)
-                pending_label_ids.extend(label_token_ids)
-                pending_position_ids.extend(range(segment_len))
-                pending_segment_ids.extend([next_segment_id for _ in range(segment_len)])
-                next_segment_id += 1
+                if len(segment_buffer) >= BUCKET_PACKING_BUFFER_SEGMENTS:
+                    yield self._build_bucket_packed_example(segment_buffer=segment_buffer)
 
-                if len(pending_input_ids) == self.max_len:
-                    yield self._build_example(
-                        input_token_ids=pending_input_ids,
-                        label_token_ids=pending_label_ids,
-                        position_ids=pending_position_ids,
-                        segment_ids=pending_segment_ids,
-                    )
-                    pending_input_ids = []
-                    pending_label_ids = []
-                    pending_position_ids = []
-                    pending_segment_ids = []
-                    next_segment_id = 0
-
-        if len(pending_input_ids) > 0:
-            yield self._build_example(
-                input_token_ids=pending_input_ids,
-                label_token_ids=pending_label_ids,
-                position_ids=pending_position_ids,
-                segment_ids=pending_segment_ids,
-            )
+        while len(segment_buffer) > 0:
+            yield self._build_bucket_packed_example(segment_buffer=segment_buffer)
 
     def _contains_sample(
         self,
@@ -200,6 +169,107 @@ class PretrainingCorpusDataset(IterableDataset[PretrainingExample]):
         for chunk_start in chunk_starts:
             window_token_ids = document_token_ids[chunk_start : chunk_start + self.max_len + 1]
             yield window_token_ids[:-1], window_token_ids[1:]
+
+    def _resolve_segment_order_key(self, segment_index: int) -> int:
+        # ---------------------------------------------------------
+        # Create a fixed-seed deterministic tie breaker so bucket
+        # packing can reorder segments without run-to-run drift.
+        # ---------------------------------------------------------
+        payload = f"{BUCKET_PACKING_SEED}:{self.corpus_case.name}:{segment_index}".encode("utf-8")
+        digest = blake2b(payload, digest_size=8).digest()
+        return int.from_bytes(digest, byteorder="big")
+
+    def _build_bucket_packed_example(
+        self,
+        segment_buffer: list[PretrainingSegment],
+    ) -> PretrainingExample:
+        # ---------------------------------------------------------
+        # Start from the longest segment, then repeatedly choose the
+        # buffered segment that best fills the remaining context.
+        # ---------------------------------------------------------
+        selected_segments: list[PretrainingSegment] = []
+        start_index = self._find_longest_segment_index(segment_buffer=segment_buffer)
+        selected_segments.append(segment_buffer.pop(start_index))
+        remaining_size = self.max_len - len(selected_segments[0][0])
+
+        while remaining_size > 0:
+            next_index = self._find_best_fit_segment_index(
+                segment_buffer=segment_buffer,
+                remaining_size=remaining_size,
+            )
+
+            if next_index is None:
+                break
+
+            selected_segment = segment_buffer.pop(next_index)
+            selected_segments.append(selected_segment)
+            remaining_size -= len(selected_segment[0])
+
+        return self._build_example_from_segments(segments=selected_segments)
+
+    def _find_longest_segment_index(
+        self,
+        segment_buffer: list[PretrainingSegment],
+    ) -> int:
+        # ---------------------------------------------------------
+        # Pick the longest segment first. The fixed order key keeps
+        # ties deterministic while allowing bounded reordering.
+        # ---------------------------------------------------------
+        return max(
+            range(len(segment_buffer)),
+            key=lambda index: (len(segment_buffer[index][0]), -segment_buffer[index][2]),
+        )
+
+    def _find_best_fit_segment_index(
+        self,
+        segment_buffer: list[PretrainingSegment],
+        remaining_size: int,
+    ) -> int | None:
+        # ---------------------------------------------------------
+        # Choose the largest segment that fits in the current gap.
+        # Return None when every remaining segment is too large.
+        # ---------------------------------------------------------
+        candidate_indexes = [
+            index
+            for index, segment in enumerate(segment_buffer)
+            if len(segment[0]) <= remaining_size
+        ]
+
+        if len(candidate_indexes) == 0:
+            return None
+
+        return max(
+            candidate_indexes,
+            key=lambda index: (len(segment_buffer[index][0]), -segment_buffer[index][2]),
+        )
+
+    def _build_example_from_segments(
+        self,
+        segments: list[PretrainingSegment],
+    ) -> PretrainingExample:
+        # ---------------------------------------------------------
+        # Flatten selected segments into one packed sample while
+        # resetting positions and segment ids for each segment.
+        # ---------------------------------------------------------
+        input_token_ids: list[int] = []
+        label_token_ids: list[int] = []
+        position_ids: list[int] = []
+        segment_ids: list[int] = []
+
+        for segment_id, segment in enumerate(segments):
+            segment_input_ids, segment_label_ids, _ = segment
+            segment_len = len(segment_input_ids)
+            input_token_ids.extend(segment_input_ids)
+            label_token_ids.extend(segment_label_ids)
+            position_ids.extend(range(segment_len))
+            segment_ids.extend([segment_id for _ in range(segment_len)])
+
+        return self._build_example(
+            input_token_ids=input_token_ids,
+            label_token_ids=label_token_ids,
+            position_ids=position_ids,
+            segment_ids=segment_ids,
+        )
 
     def _build_example(
         self,

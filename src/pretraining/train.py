@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-PACKING_VERSION = "sequence-packing-v1"
+PACKING_VERSION = "bucket-packing-v1"
 
 
 def parse_args() -> argparse.Namespace:
