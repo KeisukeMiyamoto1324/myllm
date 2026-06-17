@@ -22,10 +22,10 @@ class PretrainingCorpusCase:
 
 PRETRAINING_CORPUS_CASES = [
     PretrainingCorpusCase(
-        name="fineweb2-edu-ja",
+        name="cleaned-fineweb2-edu-jp",
         genre="web",
         language="ja",
-        dataset_path="hotchpotch/fineweb-2-edu-japanese",
+        dataset_path="MK0727/CleanedFineWeb2Edu-jp",
         config_name="default",
         split="train",
         text_column="text",

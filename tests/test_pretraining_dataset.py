@@ -153,8 +153,8 @@ class PretrainingDatasetTest(unittest.TestCase):
             ],
             [
                 (
-                    "fineweb2-edu-ja",
-                    "hotchpotch/fineweb-2-edu-japanese",
+                    "cleaned-fineweb2-edu-jp",
+                    "MK0727/CleanedFineWeb2Edu-jp",
                     "default",
                     "train",
                     "text",
