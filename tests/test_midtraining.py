@@ -55,7 +55,7 @@ class MidtrainingTest(unittest.TestCase):
 
         self.assertIsNone(args.max_len)
         self.assertEqual(args.learning_rate, 2e-5)
-        self.assertEqual(args.max_steps, 40960)
+        self.assertEqual(args.max_steps, 18000)
         self.assertEqual(args.checkpoint_every_n_steps, 5000)
         self.assertEqual(args.output_path, "models/lambda-160m-midtrained")
 
