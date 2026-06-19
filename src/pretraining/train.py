@@ -15,14 +15,13 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.pretraining.dataset import LocalTokenizedDataset
-from src.pretraining.dataset import MixedPretrainingDataset
+from src.pretraining.dataset import PretrainingCorpusDataset
 from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.device_utils import resolve_accelerator, resolve_precision
 from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
-from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
+from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
-from src.pretraining.training_corpus_cases import WIKI_RAMP_START_PROGRESS
-from src.pretraining.training_corpus_cases import serialize_pretraining_corpus_cases
+from src.pretraining.training_corpus_cases import serialize_pretraining_corpus_case
 from src.tokenizer.tokenizer import ByteLevelBPE
 from src.pretraining.transformer import DecoderOnlyTransformer
 
@@ -114,10 +113,6 @@ def parse_args() -> argparse.Namespace:
     # Number of sequence positions projected to vocabulary logits at
     # once when computing loss for large vocabulary training.
     #
-    # --mix-cycle-tokens:
-    # Number of real label tokens used as one corpus mixing cycle.
-    # Larger cycles keep the configured percentages more exact.
-    #
     # --tokenizer-path:
     # Directory path to the tokenizer artifact. This tokenizer
     # defines the vocabulary and special token ids used in training.
@@ -154,7 +149,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--loss-chunk-size", type=int, default=32)
-    parser.add_argument("--mix-cycle-tokens", type=int, default=100000)
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/lambda-160m")
     parser.add_argument("--push-to-hub", action="store_true")
@@ -192,19 +186,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_corpus_signature(
-    corpus_cases: list[PretrainingCorpusCase],
-    mix_cycle_tokens: int,
-    ramp_start_progress: float,
+    corpus_case: PretrainingCorpusCase,
 ) -> str:
     # ---------------------------------------------------------
-    # Hash the corpus mixture into a short stable cache key so
-    # validation files change when datasets or schedule changes.
+    # Hash the corpus configuration into a short stable cache key
+    # so validation files change when the dataset source changes.
     # ---------------------------------------------------------
-    payload = {
-        "corpus_cases": serialize_pretraining_corpus_cases(corpus_cases),
-        "mix_cycle_tokens": mix_cycle_tokens,
-        "ramp_start_progress": ramp_start_progress,
-    }
+    payload = serialize_pretraining_corpus_case(corpus_case)
     encoded_payload = json.dumps(payload, sort_keys=True).encode("utf-8")
     return blake2b(encoded_payload, digest_size=8).hexdigest()
 
@@ -229,9 +217,7 @@ def main() -> None:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     validation_sample_count = args.batch_size * args.val_batches
     corpus_signature = build_corpus_signature(
-        corpus_cases=PRETRAINING_CORPUS_CASES,
-        mix_cycle_tokens=args.mix_cycle_tokens,
-        ramp_start_progress=WIKI_RAMP_START_PROGRESS,
+        corpus_case=PRETRAINING_CORPUS_CASE,
     )
     default_validation_cache_path = (
         model_dir
@@ -249,35 +235,29 @@ def main() -> None:
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
-    total_training_tokens = args.max_steps * args.batch_size * args.max_len
     min_learning_rate = args.learning_rate * args.min_learning_rate_ratio
 
     # ---------------------------------------------------------
-    # Stream the scheduled training mixture and use the final
-    # static ratio to build a fixed validation cache.
+    # Stream the single training corpus and build a fixed validation
+    # cache from its deterministic validation partition.
     # ---------------------------------------------------------
-    train_dataset = MixedPretrainingDataset(
-        corpus_cases=PRETRAINING_CORPUS_CASES,
+    train_dataset = PretrainingCorpusDataset(
+        corpus_case=PRETRAINING_CORPUS_CASE,
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
-        mix_cycle_tokens=args.mix_cycle_tokens,
-        total_training_tokens=total_training_tokens,
-        ramp_start_progress=WIKI_RAMP_START_PROGRESS,
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
     )
-    validation_source_dataset = MixedPretrainingDataset(
-        corpus_cases=PRETRAINING_CORPUS_CASES,
+    validation_source_dataset = PretrainingCorpusDataset(
+        corpus_case=PRETRAINING_CORPUS_CASE,
         tokenizer=tokenizer,
         max_len=args.max_len,
         pad_token_id=pad_token_id,
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
-        mix_cycle_tokens=args.mix_cycle_tokens,
-        ramp_start_progress=WIKI_RAMP_START_PROGRESS,
         split_modulo=args.val_split_modulo,
         split_indexes=(args.val_split_index,),
     )
@@ -289,9 +269,7 @@ def main() -> None:
     validation_cache_metadata = {
         "packing_version": PACKING_VERSION,
         "corpus_signature": corpus_signature,
-        "corpus_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
-        "mix_cycle_tokens": args.mix_cycle_tokens,
-        "ramp_start_progress": WIKI_RAMP_START_PROGRESS,
+        "corpus_case": serialize_pretraining_corpus_case(PRETRAINING_CORPUS_CASE),
     }
 
     if not validation_cache_path.exists():
@@ -445,9 +423,7 @@ def main() -> None:
         "bos_token_id": bos_token_id,
         "eos_token_id": eos_token_id,
         "corpus_signature": corpus_signature,
-        "dataset_cases": serialize_pretraining_corpus_cases(PRETRAINING_CORPUS_CASES),
-        "mix_cycle_tokens": args.mix_cycle_tokens,
-        "ramp_start_progress": WIKI_RAMP_START_PROGRESS,
+        "dataset_case": serialize_pretraining_corpus_case(PRETRAINING_CORPUS_CASE),
         "val_split_modulo": args.val_split_modulo,
         "val_split_index": args.val_split_index,
         "validation_cache_path": str(validation_cache_path),

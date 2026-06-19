@@ -10,12 +10,9 @@ from torch.utils.data import IterableDataset
 
 from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.dataset import LocalTokenizedDataset
-from src.pretraining.dataset import MixedPretrainingDataset
 from src.pretraining.dataset import PretrainingCorpusDataset
-from src.pretraining.dataset import resolve_mix_token_targets
-from src.pretraining.dataset import resolve_scheduled_mix_percentages
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
-from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASES
+from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
 
 
 class FixedTokenDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]):
@@ -30,40 +27,6 @@ class FixedTokenDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor, torch.
             position_ids = torch.tensor([0, 1], dtype=torch.long)
             segment_ids = torch.tensor([0, -1], dtype=torch.long)
             yield input_ids, label_ids, position_ids, segment_ids
-
-
-class EmptyMixedPretrainingDataset(MixedPretrainingDataset):
-    def _build_corpus_iterator(
-        self,
-        corpus_case: PretrainingCorpusCase,
-    ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-        # ---------------------------------------------------------
-        # Return an empty stream so tests can verify the mixer error
-        # path without opening a remote Hugging Face dataset.
-        # ---------------------------------------------------------
-        return iter(())
-
-
-class NamedTokenMixedPretrainingDataset(MixedPretrainingDataset):
-    def _build_corpus_iterator(
-        self,
-        corpus_case: PretrainingCorpusCase,
-    ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-        # ---------------------------------------------------------
-        # Yield a source-specific token so tests can verify finite
-        # corpus exhaustion without opening remote datasets.
-        # ---------------------------------------------------------
-        token_id = 1 if corpus_case.name == "fineweb" else 2
-        input_ids = torch.tensor([token_id, 0], dtype=torch.long)
-        label_ids = torch.tensor([token_id, 0], dtype=torch.long)
-        position_ids = torch.tensor([0, 0], dtype=torch.long)
-        segment_ids = torch.tensor([0, -1], dtype=torch.long)
-        example = (input_ids, label_ids, position_ids, segment_ids)
-
-        if corpus_case.name == "wiki":
-            return iter([example])
-
-        return iter([example for _ in range(10)])
 
 
 class FixedTokenizer:
@@ -108,14 +71,10 @@ class FakeStreamingDataset:
 
 def build_case(
     name: str,
-    token_percentage: float,
-    is_ramped: bool = False,
-    repeat_on_end: bool = True,
-    excluded_url_domains: tuple[str, ...] = (),
 ) -> PretrainingCorpusCase:
     # ---------------------------------------------------------
-    # Build a minimal corpus case for tests that only need mixture
-    # settings rather than real dataset streaming.
+    # Build a minimal corpus case for tests that do not open the
+    # real remote dataset.
     # ---------------------------------------------------------
     return PretrainingCorpusCase(
         name=name,
@@ -125,171 +84,38 @@ def build_case(
         config_name="unused",
         split="train",
         text_column="text",
-        token_percentage=token_percentage,
-        is_ramped=is_ramped,
-        repeat_on_end=repeat_on_end,
-        excluded_url_domains=excluded_url_domains,
     )
 
 
 class PretrainingDatasetTest(unittest.TestCase):
-    def test_pretraining_corpus_cases_use_requested_japanese_datasets(self) -> None:
+    def test_pretraining_corpus_case_uses_cleaned_fineweb2_edu_jp(self) -> None:
         # ---------------------------------------------------------
-        # Keep the production corpus list pointed at the requested
-        # Japanese FineWeb and cleaned Wikipedia datasets.
+        # Keep pretraining pointed only at the requested Japanese
+        # FineWeb dataset.
         # ---------------------------------------------------------
         self.assertEqual(
-            [
-                (
-                    corpus_case.name,
-                    corpus_case.dataset_path,
-                    corpus_case.config_name,
-                    corpus_case.split,
-                    corpus_case.text_column,
-                    corpus_case.repeat_on_end,
-                    corpus_case.excluded_url_domains,
-                )
-                for corpus_case in PRETRAINING_CORPUS_CASES
-            ],
-            [
-                (
-                    "cleaned-fineweb2-edu-jp",
-                    "MK0727/CleanedFineWeb2Edu-jp",
-                    "default",
-                    "train",
-                    "text",
-                    True,
-                    ("wikipedia.org",),
-                ),
-                (
-                    "cleanedwiki-jp",
-                    "MK0727/CleanedWiki-jp",
-                    "all",
-                    "train",
-                    "text",
-                    True,
-                    (),
-                ),
-            ],
-        )
-
-    def test_resolve_mix_token_targets_uses_percentages(self) -> None:
-        # ---------------------------------------------------------
-        # Convert 70/30 percentages into exact integer token targets
-        # for a 10-token mixing cycle.
-        # ---------------------------------------------------------
-        corpus_cases = [
-            build_case(name="a", token_percentage=70.0),
-            build_case(name="b", token_percentage=30.0),
-        ]
-        token_targets = resolve_mix_token_targets(
-            corpus_cases=corpus_cases,
-            mix_cycle_tokens=10,
-        )
-        self.assertEqual(token_targets, [7, 3])
-
-    def test_resolve_mix_token_targets_rejects_incomplete_percentages(self) -> None:
-        # ---------------------------------------------------------
-        # Reject mixtures that do not allocate the full 100 percent
-        # token budget.
-        # ---------------------------------------------------------
-        corpus_cases = [
-            build_case(name="a", token_percentage=60.0),
-            build_case(name="b", token_percentage=30.0),
-        ]
-
-        with self.assertRaises(ValueError):
-            resolve_mix_token_targets(
-                corpus_cases=corpus_cases,
-                mix_cycle_tokens=10,
-        )
-
-    def test_resolve_scheduled_mix_percentages_ramps_late_wiki(self) -> None:
-        # ---------------------------------------------------------
-        # Keep CleanedWiki out of early training, then linearly
-        # increase it to the final 70 percent by train end.
-        # ---------------------------------------------------------
-        corpus_cases = [
-            build_case(name="fineweb", token_percentage=30.0),
-            build_case(
-                name="wiki",
-                token_percentage=70.0,
-                is_ramped=True,
-                repeat_on_end=True,
+            (
+                PRETRAINING_CORPUS_CASE.name,
+                PRETRAINING_CORPUS_CASE.dataset_path,
+                PRETRAINING_CORPUS_CASE.config_name,
+                PRETRAINING_CORPUS_CASE.split,
+                PRETRAINING_CORPUS_CASE.text_column,
             ),
-        ]
-
-        self.assertEqual(
-            resolve_scheduled_mix_percentages(
-                corpus_cases=corpus_cases,
-                progress=0.0,
-                ramp_start_progress=0.5,
+            (
+                "cleaned-fineweb2-edu-jp",
+                "MK0727/CleanedFineWeb2Edu-jp",
+                "default",
+                "train",
+                "text",
             ),
-            [100.0, 0.0],
         )
-        self.assertEqual(
-            resolve_scheduled_mix_percentages(
-                corpus_cases=corpus_cases,
-                progress=0.49,
-                ramp_start_progress=0.5,
-            ),
-            [100.0, 0.0],
-        )
-        self.assertEqual(
-            resolve_scheduled_mix_percentages(
-                corpus_cases=corpus_cases,
-                progress=0.75,
-                ramp_start_progress=0.5,
-            ),
-            [65.0, 35.0],
-        )
-        self.assertEqual(
-            resolve_scheduled_mix_percentages(
-                corpus_cases=corpus_cases,
-                progress=1.0,
-                ramp_start_progress=0.5,
-            ),
-            [30.0, 70.0],
-        )
-
-    def test_repeatable_wiki_reopens_after_stream_end(self) -> None:
-        # ---------------------------------------------------------
-        # Reopen CleanedWiki after stream end so the late-training
-        # mixture can keep using it at the scheduled percentage.
-        # ---------------------------------------------------------
-        dataset = NamedTokenMixedPretrainingDataset(
-            corpus_cases=[
-                build_case(name="fineweb", token_percentage=30.0),
-                build_case(
-                    name="wiki",
-                    token_percentage=70.0,
-                    is_ramped=True,
-                    repeat_on_end=True,
-                ),
-            ],
-            tokenizer=None,
-            max_len=2,
-            pad_token_id=0,
-            bos_token_id=1,
-            eos_token_id=2,
-            mix_cycle_tokens=10,
-            total_training_tokens=1,
-            ramp_start_progress=0.0,
-        )
-
-        dataset_iterator = iter(dataset)
-        input_ids = [next(dataset_iterator)[0] for _ in range(25)]
-        token_ids = [input_id[0].item() for input_id in input_ids]
-
-        self.assertEqual(token_ids.count(2), 9)
-        self.assertEqual(token_ids[:3], [1, 1, 1])
 
     def test_pretraining_corpus_split_uses_text_column(self) -> None:
         # ---------------------------------------------------------
         # Split a sample by its configured text column instead of a
         # hard-coded column name.
         # ---------------------------------------------------------
-        corpus_case = build_case(name="custom", token_percentage=100.0)
+        corpus_case = build_case(name="custom")
         corpus_case.text_column = "body"
         dataset = PretrainingCorpusDataset(
             corpus_case=corpus_case,
@@ -310,54 +136,12 @@ class PretrainingDatasetTest(unittest.TestCase):
         )
         self.assertIn(split_index, dataset.split_indexes)
 
-    def test_pretraining_corpus_filters_excluded_wikipedia_urls(self) -> None:
-        # ---------------------------------------------------------
-        # Drop only Wikipedia hostnames and subdomains from FineWeb
-        # while keeping unrelated wiki-looking domains available.
-        # ---------------------------------------------------------
-        corpus_case = build_case(
-            name="fineweb",
-            token_percentage=100.0,
-            excluded_url_domains=("wikipedia.org",),
-        )
-        dataset = PretrainingCorpusDataset(
-            corpus_case=corpus_case,
-            tokenizer=None,
-            max_len=4,
-            pad_token_id=0,
-            bos_token_id=1,
-            eos_token_id=2,
-        )
-
-        self.assertFalse(
-            dataset._contains_allowed_url(
-                sample={"url": "https://ja.wikipedia.org/wiki/Python"}
-            )
-        )
-        self.assertFalse(
-            dataset._contains_allowed_url(
-                sample={"url": "https://www.wikipedia.org/portal/"}
-            )
-        )
-        self.assertTrue(
-            dataset._contains_allowed_url(
-                sample={"url": "https://example.com/wiki/Python"}
-            )
-        )
-        self.assertTrue(
-            dataset._contains_allowed_url(
-                sample={"url": "https://ja.lotr.wikia.com/wiki/Page"}
-            )
-        )
-        self.assertTrue(dataset._contains_allowed_url(sample={"url": "not-a-url"}))
-        self.assertTrue(dataset._contains_allowed_url(sample={}))
-
     def test_pretraining_corpus_shards_streaming_dataset_by_worker(self) -> None:
         # ---------------------------------------------------------
         # Read only the current worker shard so parallel workers do
         # not replay the same streaming samples.
         # ---------------------------------------------------------
-        corpus_case = build_case(name="custom", token_percentage=100.0)
+        corpus_case = build_case(name="custom")
         dataset = PretrainingCorpusDataset(
             corpus_case=corpus_case,
             tokenizer=FixedTokenizer(),
@@ -383,12 +167,39 @@ class PretrainingDatasetTest(unittest.TestCase):
         input_token_ids = [example[0][1].item() for example in examples]
         self.assertEqual(sorted(input_token_ids), [20, 40])
 
+    def test_pretraining_corpus_keeps_wikipedia_urls(self) -> None:
+        # ---------------------------------------------------------
+        # Keep Wikipedia documents because the single FineWeb corpus
+        # no longer applies URL-domain exclusions.
+        # ---------------------------------------------------------
+        dataset = PretrainingCorpusDataset(
+            corpus_case=build_case(name="custom"),
+            tokenizer=FixedTokenizer(),
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        fake_dataset = FakeStreamingDataset(
+            samples=[
+                {
+                    "text": "10",
+                    "url": "https://ja.wikipedia.org/wiki/Python",
+                },
+            ]
+        )
+
+        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
+            examples = list(iter(dataset))
+
+        self.assertEqual(examples[0][0].tolist(), [1, 10])
+
     def test_pretraining_corpus_bucket_packs_best_fit_documents(self) -> None:
         # ---------------------------------------------------------
         # Pack short documents by best fit so equal-length segments
         # can fill the context window without padding.
         # ---------------------------------------------------------
-        corpus_case = build_case(name="custom", token_percentage=100.0)
+        corpus_case = build_case(name="custom")
         dataset = PretrainingCorpusDataset(
             corpus_case=corpus_case,
             tokenizer=FixedTokenizer(),
@@ -418,7 +229,7 @@ class PretrainingDatasetTest(unittest.TestCase):
         # Flush all buffered segments at stream end so short leftover
         # documents are still emitted as padded packed samples.
         # ---------------------------------------------------------
-        corpus_case = build_case(name="custom", token_percentage=100.0)
+        corpus_case = build_case(name="custom")
         dataset = PretrainingCorpusDataset(
             corpus_case=corpus_case,
             tokenizer=FixedTokenizer(),
@@ -449,7 +260,7 @@ class PretrainingDatasetTest(unittest.TestCase):
         # Split a single long document into max_len-sized segments
         # so long samples are not dropped during packing.
         # ---------------------------------------------------------
-        corpus_case = build_case(name="custom", token_percentage=100.0)
+        corpus_case = build_case(name="custom")
         dataset = PretrainingCorpusDataset(
             corpus_case=corpus_case,
             tokenizer=FixedTokenizer(),
@@ -469,28 +280,10 @@ class PretrainingDatasetTest(unittest.TestCase):
             ],
         )
 
-    def test_mixed_dataset_reports_empty_filtered_corpus(self) -> None:
-        # ---------------------------------------------------------
-        # Convert a twice-empty corpus stream into a clear data split
-        # error instead of leaking StopIteration from the generator.
-        # ---------------------------------------------------------
-        dataset = EmptyMixedPretrainingDataset(
-            corpus_cases=[build_case(name="empty", token_percentage=100.0)],
-            tokenizer=None,
-            max_len=4,
-            pad_token_id=0,
-            bos_token_id=1,
-            eos_token_id=2,
-            mix_cycle_tokens=4,
-        )
-
-        with self.assertRaisesRegex(ValueError, "empty"):
-            next(iter(dataset))
-
     def test_build_tokenized_cache_keeps_metadata(self) -> None:
         # ---------------------------------------------------------
         # Store caller-provided corpus metadata beside validation
-        # tensors so stale mixed caches can be identified.
+        # tensors so stale caches can be identified.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "validation.pt"
@@ -512,7 +305,7 @@ class PretrainingDatasetTest(unittest.TestCase):
     def test_local_tokenized_dataset_rejects_metadata_mismatch(self) -> None:
         # ---------------------------------------------------------
         # Refuse a cache file when an explicit validation path points
-        # to tensors from a different corpus mixture.
+        # to tensors from a different corpus.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "validation.pt"

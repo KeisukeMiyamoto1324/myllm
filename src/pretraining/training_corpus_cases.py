@@ -2,9 +2,6 @@ from dataclasses import asdict
 from dataclasses import dataclass
 
 
-WIKI_RAMP_START_PROGRESS = 0.5
-
-
 @dataclass
 class PretrainingCorpusCase:
     name: str
@@ -14,47 +11,24 @@ class PretrainingCorpusCase:
     config_name: str
     split: str
     text_column: str
-    token_percentage: float
-    is_ramped: bool
-    repeat_on_end: bool
-    excluded_url_domains: tuple[str, ...]
 
 
-PRETRAINING_CORPUS_CASES = [
-    PretrainingCorpusCase(
-        name="cleaned-fineweb2-edu-jp",
-        genre="web",
-        language="ja",
-        dataset_path="MK0727/CleanedFineWeb2Edu-jp",
-        config_name="default",
-        split="train",
-        text_column="text",
-        token_percentage=30.0,
-        is_ramped=False,
-        repeat_on_end=True,
-        excluded_url_domains=("wikipedia.org",),
-    ),
-    PretrainingCorpusCase(
-        name="cleanedwiki-jp",
-        genre="wiki",
-        language="ja",
-        dataset_path="MK0727/CleanedWiki-jp",
-        config_name="all",
-        split="train",
-        text_column="text",
-        token_percentage=70.0,
-        is_ramped=True,
-        repeat_on_end=True,
-        excluded_url_domains=(),
-    ),
-]
+PRETRAINING_CORPUS_CASE = PretrainingCorpusCase(
+    name="cleaned-fineweb2-edu-jp",
+    genre="web",
+    language="ja",
+    dataset_path="MK0727/CleanedFineWeb2Edu-jp",
+    config_name="default",
+    split="train",
+    text_column="text",
+)
 
 
-def serialize_pretraining_corpus_cases(
-    corpus_cases: list[PretrainingCorpusCase],
-) -> list[dict[str, str | float | bool | tuple[str, ...]]]:
+def serialize_pretraining_corpus_case(
+    corpus_case: PretrainingCorpusCase,
+) -> dict[str, str]:
     # ---------------------------------------------------------
-    # Convert corpus cases to JSON-compatible dictionaries so
-    # training artifacts can record the exact data mixture.
+    # Convert the corpus case to a JSON-compatible dictionary so
+    # training artifacts can record the exact dataset source.
     # ---------------------------------------------------------
-    return [asdict(corpus_case) for corpus_case in corpus_cases]
+    return asdict(corpus_case)
