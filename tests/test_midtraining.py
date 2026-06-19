@@ -4,11 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import torch
-
-from src.midtraining.train import MIDTRAINING_EPOCHS
 from src.midtraining.train import parse_args
-from src.midtraining.train import resolve_initial_epoch
 from src.midtraining.training_corpus_cases import MIDTRAINING_CORPUS_CASE
 
 
@@ -32,13 +28,6 @@ class MidtrainingTest(unittest.TestCase):
                 "rewrite",
             ),
         )
-
-    def test_midtraining_runs_three_epochs(self) -> None:
-        # ---------------------------------------------------------
-        # Keep the requested corpus pass count fixed so one training
-        # run consumes every training partition row three times.
-        # ---------------------------------------------------------
-        self.assertEqual(MIDTRAINING_EPOCHS, 3)
 
     def test_parse_args_requires_pretrained_model_directory(self) -> None:
         # ---------------------------------------------------------
@@ -66,20 +55,32 @@ class MidtrainingTest(unittest.TestCase):
 
         self.assertIsNone(args.max_len)
         self.assertEqual(args.learning_rate, 2e-5)
+        self.assertEqual(args.max_steps, 40960)
+        self.assertEqual(args.checkpoint_every_n_steps, 5000)
         self.assertEqual(args.output_path, "models/lambda-160m-midtrained")
 
-    def test_epoch_checkpoint_resumes_from_next_corpus_pass(self) -> None:
+    def test_parse_args_rejects_invalid_step_budget(self) -> None:
         # ---------------------------------------------------------
-        # Set the initial dataset shuffle before Lightning creates
-        # its first resumed DataLoader iterator.
+        # Reject non-positive step values before creating datasets
+        # or loading the pretrained model weights.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
-            checkpoint_path = Path(temp_dir) / "epoch.ckpt"
-            torch.save({"epoch": 1}, checkpoint_path)
-            initial_epoch = resolve_initial_epoch(str(checkpoint_path))
+            model_dir = Path(temp_dir)
 
-        self.assertEqual(resolve_initial_epoch(""), 0)
-        self.assertEqual(initial_epoch, 2)
+            for file_name in ["model.pth", "model_config.json", "tokenizer.json"]:
+                (model_dir / file_name).touch()
+
+            argv = [
+                "train.py",
+                "--model-path",
+                str(model_dir),
+                "--max-steps",
+                "0",
+            ]
+
+            with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parse_args()
 
 
 if __name__ == "__main__":

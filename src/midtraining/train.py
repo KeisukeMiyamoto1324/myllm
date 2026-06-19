@@ -33,7 +33,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-MIDTRAINING_EPOCHS = 3
 PACKING_VERSION = "bucket-packing-v1"
 SHUFFLE_BUFFER_SIZE = 10000
 SHUFFLE_SEED = 17
@@ -67,12 +66,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-len", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--batch-size", type=int, default=96)
+    parser.add_argument("--max-steps", type=int, default=40960)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
     parser.add_argument("--val-split-index", type=int, default=0)
     parser.add_argument("--val-batches", type=int, default=64)
     parser.add_argument("--validation-cache-path", type=str, default="")
     parser.add_argument("--val-check-interval", type=int, default=1000)
+    parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--loss-chunk-size", type=int, default=32)
     parser.add_argument("--output-path", type=str, default="models/lambda-160m-midtrained")
@@ -100,6 +101,12 @@ def parse_args() -> argparse.Namespace:
     if args.learning_rate <= 0.0:
         parser.error("--learning-rate must be greater than 0")
 
+    if args.max_steps <= 0:
+        parser.error("--max-steps must be greater than 0")
+
+    if args.checkpoint_every_n_steps <= 0:
+        parser.error("--checkpoint-every-n-steps must be greater than 0")
+
     if args.val_split_modulo <= 1:
         parser.error("--val-split-modulo must be greater than 1")
 
@@ -125,22 +132,6 @@ def build_corpus_signature() -> str:
     return blake2b(encoded_payload, digest_size=8).hexdigest()
 
 
-def resolve_initial_epoch(checkpoint_path: str) -> int:
-    # ---------------------------------------------------------
-    # Start fresh runs at epoch zero. Epoch-end checkpoints resume
-    # from the next complete corpus pass.
-    # ---------------------------------------------------------
-    if not checkpoint_path:
-        return 0
-
-    checkpoint = torch.load(
-        Path(checkpoint_path),
-        map_location="cpu",
-        weights_only=True,
-    )
-    return int(checkpoint["epoch"]) + 1
-
-
 def main() -> None:
     # ---------------------------------------------------------
     # Load the pretrained artifacts and resolve the requested
@@ -159,7 +150,7 @@ def main() -> None:
 
     # ---------------------------------------------------------
     # Prepare output, validation cache, and deterministic corpus
-    # partitions shared by all three training epochs.
+    # partitions shared by the full step-bounded training run.
     # ---------------------------------------------------------
     model_dir = Path(args.output_path)
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -182,8 +173,8 @@ def main() -> None:
     )
 
     # ---------------------------------------------------------
-    # Stream one finite corpus pass per Lightning epoch. The epoch
-    # callback changes the shuffle seed before each new pass.
+    # Stream finite corpus passes until the configured optimizer
+    # step budget is reached, changing shuffle order each pass.
     # ---------------------------------------------------------
     train_dataset = PackedCorpusDataset(
         corpus_case=MIDTRAINING_CORPUS_CASE,
@@ -196,9 +187,6 @@ def main() -> None:
         split_indexes=train_split_indexes,
         shuffle_buffer_size=SHUFFLE_BUFFER_SIZE,
         shuffle_seed=SHUFFLE_SEED,
-    )
-    train_dataset.set_epoch(
-        epoch_index=resolve_initial_epoch(checkpoint_path=args.resume_from_checkpoint)
     )
     validation_source_dataset = PackedCorpusDataset(
         corpus_case=MIDTRAINING_CORPUS_CASE,
@@ -260,21 +248,21 @@ def main() -> None:
     model.loss_chunk_size = args.loss_chunk_size
 
     # ---------------------------------------------------------
-    # Save one resumable checkpoint after every completed epoch,
-    # the best validation checkpoint, and batched CSV metrics.
+    # Save resumable checkpoints at fixed step intervals, the best
+    # validation checkpoint, and batched CSV metrics.
     # ---------------------------------------------------------
     callbacks = [
         DatasetEpochCallback(dataset=train_dataset),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename="epoch-{epoch}",
-            every_n_epochs=1,
+            filename="step-{step}",
+            every_n_train_steps=args.checkpoint_every_n_steps,
             save_top_k=-1,
-            save_on_train_epoch_end=True,
+            save_on_train_epoch_end=False,
         ),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
-            filename="best-epoch={epoch}-val_loss={val_loss:.4f}",
+            filename="best-step={step}-val_loss={val_loss:.4f}",
             monitor="val_loss",
             mode="min",
             save_top_k=1,
@@ -289,7 +277,7 @@ def main() -> None:
         flush_logs_every_n_steps=args.metric_log_every_n_steps,
     )
     trainer = L.Trainer(
-        max_epochs=MIDTRAINING_EPOCHS,
+        max_steps=args.max_steps,
         accelerator=accelerator,
         devices=1,
         precision=precision,
@@ -310,7 +298,7 @@ def main() -> None:
 
     # ---------------------------------------------------------
     # Save final weights with inherited architecture metadata and
-    # the exact fixed-LR, corpus, and three-epoch training details.
+    # the exact fixed-LR, corpus, and step budget details.
     # ---------------------------------------------------------
     torch.save(model.state_dict(), model_dir / "model.pth")
     model_config = {
@@ -323,8 +311,7 @@ def main() -> None:
         "bos_token_id": bos_token_id,
         "eos_token_id": eos_token_id,
         "midtraining_source_model": str(source_model_dir),
-        "midtraining_epochs": MIDTRAINING_EPOCHS,
-        "midtraining_completed_epochs": trainer.current_epoch,
+        "midtraining_max_steps": args.max_steps,
         "dataset_case": serialize_midtraining_corpus_case(MIDTRAINING_CORPUS_CASE),
         "corpus_signature": corpus_signature,
         "val_split_modulo": args.val_split_modulo,
@@ -341,7 +328,15 @@ def main() -> None:
     # Remove the inherited pretraining scheduler fields because
     # mid-training uses one fixed learning rate for all epochs.
     # ---------------------------------------------------------
-    for key in ["lr_warmup_steps", "min_learning_rate", "min_learning_rate_ratio"]:
+    obsolete_config_keys = [
+        "lr_warmup_steps",
+        "min_learning_rate",
+        "min_learning_rate_ratio",
+        "midtraining_epochs",
+        "midtraining_completed_epochs",
+    ]
+
+    for key in obsolete_config_keys:
         model_config.pop(key, None)
 
     with open(model_dir / "model_config.json", "w") as file:
