@@ -76,6 +76,37 @@ class PretrainingPytorchArtifactsTest(unittest.TestCase):
         self.assertEqual(loaded_config["max_len"], 16)
         self.assertTrue(torch.equal(model.we.weight, loaded_model.we.weight))
 
+    def test_load_pytorch_model_rebuilds_position_buffer_for_new_max_len(self) -> None:
+        # ---------------------------------------------------------
+        # Keep learned weights while replacing only the deterministic
+        # sinusoidal position buffer for a new context length.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir)
+            model = DecoderOnlyTransformer(
+                num_tokens=12,
+                d_model=8,
+                max_len=16,
+                num_layers=2,
+                num_heads=2,
+                d_ff=16,
+                pad_token_id=0,
+            )
+            torch.save(model.state_dict(), output_path / "model.pth")
+            (output_path / "model_config.json").write_text(
+                json.dumps(build_model_config()),
+                encoding="utf-8",
+            )
+
+            loaded_model, _ = load_pytorch_model(
+                model_dir=output_path,
+                vocab_size=12,
+                max_len=32,
+            )
+
+        self.assertEqual(loaded_model.pe.pe.size(dim=0), 32)
+        self.assertTrue(torch.equal(model.we.weight, loaded_model.we.weight))
+
     def test_push_uses_hub_model_repo_and_only_allows_artifacts(self) -> None:
         # ---------------------------------------------------------
         # Mock the Hub client so publishing behavior is verified

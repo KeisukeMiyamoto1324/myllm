@@ -14,9 +14,9 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.pretraining.dataset import LocalTokenizedDataset
-from src.pretraining.dataset import PretrainingCorpusDataset
-from src.pretraining.dataset import build_tokenized_cache
+from src.shared.packed_dataset import build_tokenized_cache
+from src.shared.packed_dataset import LocalTokenizedDataset
+from src.shared.packed_dataset import PackedCorpusDataset
 from src.shared.device_utils import resolve_accelerator, resolve_precision
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
@@ -241,7 +241,7 @@ def main() -> None:
     # Stream the single training corpus and build a fixed validation
     # cache from its deterministic validation partition.
     # ---------------------------------------------------------
-    train_dataset = PretrainingCorpusDataset(
+    train_dataset = PackedCorpusDataset(
         corpus_case=PRETRAINING_CORPUS_CASE,
         tokenizer=tokenizer,
         max_len=args.max_len,
@@ -251,7 +251,7 @@ def main() -> None:
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
     )
-    validation_source_dataset = PretrainingCorpusDataset(
+    validation_source_dataset = PackedCorpusDataset(
         corpus_case=PRETRAINING_CORPUS_CASE,
         tokenizer=tokenizer,
         max_len=args.max_len,

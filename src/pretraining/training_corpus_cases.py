@@ -1,16 +1,8 @@
-from dataclasses import asdict
-from dataclasses import dataclass
+from src.shared.training_corpus import serialize_training_corpus_case
+from src.shared.training_corpus import TrainingCorpusCase
 
 
-@dataclass
-class PretrainingCorpusCase:
-    name: str
-    genre: str
-    language: str
-    dataset_path: str
-    config_name: str
-    split: str
-    text_column: str
+PretrainingCorpusCase = TrainingCorpusCase
 
 
 PRETRAINING_CORPUS_CASE = PretrainingCorpusCase(
@@ -31,4 +23,4 @@ def serialize_pretraining_corpus_case(
     # Convert the corpus case to a JSON-compatible dictionary so
     # training artifacts can record the exact dataset source.
     # ---------------------------------------------------------
-    return asdict(corpus_case)
+    return serialize_training_corpus_case(corpus_case=corpus_case)

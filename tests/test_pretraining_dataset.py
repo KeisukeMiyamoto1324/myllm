@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from collections.abc import Iterator
 from pathlib import Path
+import random
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -61,6 +62,16 @@ class FakeStreamingDataset:
         # partitioning can be tested without remote datasets.
         # ---------------------------------------------------------
         return FakeStreamingDataset(samples=self.samples[index::num_shards])
+
+    def shuffle(self, seed: int, buffer_size: int) -> "FakeStreamingDataset":
+        # ---------------------------------------------------------
+        # Shuffle the complete small test list while accepting the
+        # same arguments as a streaming Hugging Face dataset.
+        # ---------------------------------------------------------
+        del buffer_size
+        shuffled_samples = list(self.samples)
+        random.Random(seed).shuffle(shuffled_samples)
+        return FakeStreamingDataset(samples=shuffled_samples)
 
     def __iter__(self) -> Iterator[dict[str, str]]:
         # ---------------------------------------------------------
@@ -160,8 +171,8 @@ class PretrainingDatasetTest(unittest.TestCase):
         )
         worker_info = type("WorkerInfo", (), {"num_workers": 2, "id": 1})()
 
-        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
-            with patch("src.pretraining.dataset.get_worker_info", return_value=worker_info):
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
+            with patch("src.shared.packed_dataset.get_worker_info", return_value=worker_info):
                 examples = list(iter(dataset))
 
         input_token_ids = [example[0][1].item() for example in examples]
@@ -189,7 +200,7 @@ class PretrainingDatasetTest(unittest.TestCase):
             ]
         )
 
-        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
             examples = list(iter(dataset))
 
         self.assertEqual(examples[0][0].tolist(), [1, 10])
@@ -216,7 +227,7 @@ class PretrainingDatasetTest(unittest.TestCase):
             ]
         )
 
-        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
             input_ids, label_ids, position_ids, segment_ids = next(iter(dataset))
 
         self.assertEqual(input_ids.tolist(), [1, 10, 11, 1, 30, 31])
@@ -246,7 +257,7 @@ class PretrainingDatasetTest(unittest.TestCase):
             ]
         )
 
-        with patch("src.pretraining.dataset.load_dataset", return_value=fake_dataset):
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
             examples = list(iter(dataset))
 
         input_ids, label_ids, position_ids, segment_ids = examples[1]
@@ -279,6 +290,36 @@ class PretrainingDatasetTest(unittest.TestCase):
                 ([12, 13], [13, 2]),
             ],
         )
+
+    def test_packed_corpus_changes_shuffle_order_by_epoch(self) -> None:
+        # ---------------------------------------------------------
+        # Use a reproducible but distinct shuffle seed for every
+        # corpus pass in multi-epoch mid-training.
+        # ---------------------------------------------------------
+        dataset = PretrainingCorpusDataset(
+            corpus_case=build_case(name="custom"),
+            tokenizer=FixedTokenizer(),
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+            shuffle_buffer_size=10000,
+            shuffle_seed=17,
+        )
+        fake_dataset = FakeStreamingDataset(
+            samples=[{"text": str(value)} for value in range(10, 20)]
+        )
+
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
+            first_epoch = [example[0][1].item() for example in dataset]
+            dataset.set_epoch(epoch_index=1)
+            second_epoch = [example[0][1].item() for example in dataset]
+            dataset.set_epoch(epoch_index=0)
+            repeated_first_epoch = [example[0][1].item() for example in dataset]
+
+        self.assertNotEqual(first_epoch, second_epoch)
+        self.assertEqual(first_epoch, repeated_first_epoch)
+        self.assertEqual(sorted(first_epoch), list(range(10, 20)))
 
     def test_build_tokenized_cache_keeps_metadata(self) -> None:
         # ---------------------------------------------------------

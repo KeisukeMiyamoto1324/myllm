@@ -40,6 +40,7 @@ def build_model_from_config(
     vocab_size: int,
     learning_rate: float | None = None,
     use_fused_optimizer: bool = False,
+    max_len: int | None = None,
 ) -> DecoderOnlyTransformer:
     # ---------------------------------------------------------
     # Recreate the local Transformer from saved architecture
@@ -48,7 +49,7 @@ def build_model_from_config(
     return DecoderOnlyTransformer(
         num_tokens=vocab_size,
         d_model=int(model_config["d_model"]),
-        max_len=int(model_config["max_len"]),
+        max_len=int(model_config["max_len"] if max_len is None else max_len),
         num_layers=int(model_config["num_layers"]),
         num_heads=int(model_config["num_heads"]),
         d_ff=int(model_config["d_ff"]),
@@ -64,6 +65,7 @@ def load_pytorch_model(
     learning_rate: float | None = None,
     use_fused_optimizer: bool = False,
     map_location: str | torch.device = "cpu",
+    max_len: int | None = None,
 ) -> tuple[DecoderOnlyTransformer, ModelConfig]:
     # ---------------------------------------------------------
     # Load PyTorch weights directly from model.pth and return both
@@ -75,12 +77,22 @@ def load_pytorch_model(
         vocab_size=vocab_size,
         learning_rate=learning_rate,
         use_fused_optimizer=use_fused_optimizer,
+        max_len=max_len,
     )
     model_state = torch.load(
         model_dir / "model.pth",
         map_location=map_location,
         weights_only=True,
     )
+    requested_max_len = int(model_config["max_len"] if max_len is None else max_len)
+
+    # ---------------------------------------------------------
+    # Regenerate the sinusoidal position buffer when context length
+    # changes because it contains no learned model parameters.
+    # ---------------------------------------------------------
+    if requested_max_len != int(model_config["max_len"]):
+        model_state["pe.pe"] = model.state_dict()["pe.pe"]
+
     model.load_state_dict(model_state)
     return model, model_config
 

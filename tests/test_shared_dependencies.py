@@ -5,6 +5,7 @@ import unittest
 
 STAGE_NAMES = {
     "inference_base",
+    "midtraining",
     "posttraining",
     "pretraining",
     "tokenizer",
