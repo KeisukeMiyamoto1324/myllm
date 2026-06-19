@@ -11,7 +11,7 @@ from src.inference_base.cli import parse_args
 from src.inference_base.generation import generate_continuation_text
 from src.inference_base.generation import generate_token_ids
 from src.inference_base.generation import resolve_torch_dtype
-from src.pretraining.kv_cache import KeyValueCache
+from src.shared.model.kv_cache import KeyValueCache
 
 
 class FakeTokenizer:

@@ -4,7 +4,7 @@ from src.posttraining.dataset import EVERYDAY_TRAIN_SPLIT
 from src.posttraining.dataset import EVERYDAY_VALIDATION_SPLIT
 from src.posttraining.dataset import EverydayChatDataset
 from src.posttraining.dataset import MagpieChatDataset
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.tokenizer import ByteLevelBPE
 
 
 def build_dataloaders(

@@ -1,8 +1,8 @@
 import torch
 
-from src.pretraining.kv_cache import KeyValueCache
-from src.pretraining.transformer import DecoderOnlyTransformer
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.model.kv_cache import KeyValueCache
+from src.shared.model.transformer import DecoderOnlyTransformer
+from src.shared.tokenizer import ByteLevelBPE
 
 
 def resolve_torch_dtype(torch_dtype: str) -> torch.dtype | None:

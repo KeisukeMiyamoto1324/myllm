@@ -9,7 +9,7 @@ import sys
 # ---------------------------------------------------------
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.tokenizer import ByteLevelBPE
 
 
 def parse_args() -> argparse.Namespace:

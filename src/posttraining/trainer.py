@@ -6,7 +6,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
-from src.pretraining.transformer import DecoderOnlyTransformer
+from src.shared.model.transformer import DecoderOnlyTransformer
 
 
 def build_trainer(

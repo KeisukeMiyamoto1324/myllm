@@ -5,7 +5,7 @@ import torch
 from huggingface_hub import HfApi
 from huggingface_hub import snapshot_download
 
-from src.pretraining.transformer import DecoderOnlyTransformer
+from src.shared.model.transformer import DecoderOnlyTransformer
 
 
 ModelConfig = dict[str, int | float | str | list[object]]

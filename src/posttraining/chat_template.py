@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.tokenizer import ByteLevelBPE
 
 
 @dataclass(frozen=True)

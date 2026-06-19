@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 import torch
 
-from src.pretraining.pytorch_artifacts import build_model_from_config
-from src.pretraining.pytorch_artifacts import load_pytorch_model
-from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
-from src.pretraining.transformer import DecoderOnlyTransformer
+from src.shared.pytorch_artifacts import build_model_from_config
+from src.shared.pytorch_artifacts import load_pytorch_model
+from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
+from src.shared.model.transformer import DecoderOnlyTransformer
 
 
 def build_model_config() -> dict[str, int | float]:
@@ -85,7 +85,7 @@ class PretrainingPytorchArtifactsTest(unittest.TestCase):
             output_path = Path(temp_dir)
             api = MagicMock()
 
-            with patch("src.pretraining.pytorch_artifacts.HfApi", return_value=api):
+            with patch("src.shared.pytorch_artifacts.HfApi", return_value=api):
                 push_pytorch_model_artifacts(
                     output_path=output_path,
                     repo_id="user/myllm",

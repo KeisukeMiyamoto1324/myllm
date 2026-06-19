@@ -2,10 +2,10 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-from src.pretraining.device_utils import resolve_device
-from src.pretraining.pytorch_artifacts import load_pytorch_model
-from src.pretraining.transformer import DecoderOnlyTransformer
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.device_utils import resolve_device
+from src.shared.pytorch_artifacts import load_pytorch_model
+from src.shared.model.transformer import DecoderOnlyTransformer
+from src.shared.tokenizer import ByteLevelBPE
 
 
 DEFAULT_BASE_MODEL_ID = "MK0727/lambda-160m"

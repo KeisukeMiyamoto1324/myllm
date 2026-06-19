@@ -7,9 +7,9 @@ from unittest.mock import patch
 import torch
 
 from src.pretraining.train import parse_args
-from src.pretraining.transformer import DecoderOnlyTransformer
-from src.pretraining.transformer import build_packed_attention_mask
-from src.pretraining.transformer import resolve_warmup_cosine_learning_rate
+from src.shared.model.transformer import DecoderOnlyTransformer
+from src.shared.model.transformer import build_packed_attention_mask
+from src.shared.model.transformer import resolve_warmup_cosine_learning_rate
 
 
 class PretrainingTrainTest(unittest.TestCase):

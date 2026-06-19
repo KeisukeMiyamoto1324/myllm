@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.pretraining.kv_cache import LayerKeyValueCache
+from src.shared.model.kv_cache import LayerKeyValueCache
 
 
 class Attention(nn.Module):

@@ -19,8 +19,8 @@ from src.posttraining.model_setup import DEFAULT_BASE_MODEL_ID
 from src.posttraining.model_setup import download_base_model
 from src.posttraining.model_setup import load_base_model
 from src.posttraining.trainer import train_stage
-from src.pretraining.device_utils import resolve_accelerator
-from src.pretraining.device_utils import resolve_precision
+from src.shared.device_utils import resolve_accelerator
+from src.shared.device_utils import resolve_precision
 load_dotenv()
 
 

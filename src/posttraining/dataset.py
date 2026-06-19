@@ -8,7 +8,7 @@ from torch.utils.data import get_worker_info
 
 from src.posttraining.chat_template import ChatMessage
 from src.posttraining.chat_template import tokenize_chat_messages
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.tokenizer import ByteLevelBPE
 
 
 MAGPIE_DATASET_PATH = "Magpie-Align/Magpie-Pro-300K-Filtered"

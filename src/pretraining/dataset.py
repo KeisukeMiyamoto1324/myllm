@@ -10,7 +10,7 @@ from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
 
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
-from src.tokenizer.tokenizer import ByteLevelBPE
+from src.shared.tokenizer import ByteLevelBPE
 
 
 PretrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]

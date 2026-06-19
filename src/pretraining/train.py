@@ -17,13 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.pretraining.dataset import LocalTokenizedDataset
 from src.pretraining.dataset import PretrainingCorpusDataset
 from src.pretraining.dataset import build_tokenized_cache
-from src.pretraining.device_utils import resolve_accelerator, resolve_precision
-from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
+from src.shared.device_utils import resolve_accelerator, resolve_precision
+from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
 from src.pretraining.training_corpus_cases import serialize_pretraining_corpus_case
-from src.tokenizer.tokenizer import ByteLevelBPE
-from src.pretraining.transformer import DecoderOnlyTransformer
+from src.shared.tokenizer import ByteLevelBPE
+from src.shared.model.transformer import DecoderOnlyTransformer
 
 from dotenv import load_dotenv
 load_dotenv()

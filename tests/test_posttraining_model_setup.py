@@ -12,7 +12,7 @@ from src.posttraining.model_setup import DEFAULT_BASE_MODEL_ID
 from src.posttraining.model_setup import download_base_model
 from src.posttraining.model_setup import load_base_model
 from src.posttraining.train import parse_args
-from src.pretraining.transformer import DecoderOnlyTransformer
+from src.shared.model.transformer import DecoderOnlyTransformer
 
 
 class FakeTokenizer:

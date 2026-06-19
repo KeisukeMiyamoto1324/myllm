@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.pretraining.pytorch_artifacts import push_pytorch_model_artifacts
+from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
 
 
 def main() -> None:

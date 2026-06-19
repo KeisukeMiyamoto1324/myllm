@@ -6,9 +6,9 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
 
-from .kv_cache import KeyValueCache, LayerKeyValueCache
-from .position_encoding import PositionEncoding
-from .self_attention import Attention
+from src.shared.model.kv_cache import KeyValueCache, LayerKeyValueCache
+from src.shared.model.position_encoding import PositionEncoding
+from src.shared.model.self_attention import Attention
 
 
 class FeedForward(nn.Module):

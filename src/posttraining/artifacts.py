@@ -9,7 +9,7 @@ from src.posttraining.dataset import EVERYDAY_TRAIN_SPLIT
 from src.posttraining.dataset import EVERYDAY_VALIDATION_SPLIT
 from src.posttraining.dataset import MAGPIE_DATASET_PATH
 from src.posttraining.dataset import MAGPIE_DATASET_SPLIT
-from src.pretraining.transformer import DecoderOnlyTransformer
+from src.shared.model.transformer import DecoderOnlyTransformer
 
 
 def save_chat_model(
