@@ -70,8 +70,12 @@ def parse_args() -> argparse.Namespace:
     # A positive floor keeps small updates active near train end.
     #
     # --batch-size:
-    # Number of samples processed in one optimizer step. Larger
-    # batches improve throughput but require more device memory.
+    # Number of samples processed in one forward and backward pass.
+    # Larger batches improve throughput but require more device memory.
+    #
+    # --gradient-accumulation-steps:
+    # Number of batches accumulated before one optimizer step. This
+    # increases the effective batch size without increasing peak memory.
     #
     # --max-steps:
     # Total number of optimizer steps before training stops. This
@@ -137,8 +141,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--d-ff", type=int, default=3072)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--lr-warmup-steps", type=int, default=2000)
-    parser.add_argument("--min-learning-rate-ratio", type=float, default=0.1)
+    parser.add_argument("--min-learning-rate-ratio", type=float, default=0.5)
     parser.add_argument("--batch-size", type=int, default=96)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=16)
     parser.add_argument("--max-steps", type=int, default=40960)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--val-split-modulo", type=int, default=100)
@@ -168,6 +173,9 @@ def parse_args() -> argparse.Namespace:
 
     if args.min_learning_rate_ratio < 0.0 or args.min_learning_rate_ratio > 1.0:
         parser.error("--min-learning-rate-ratio must be between 0.0 and 1.0")
+
+    if args.gradient_accumulation_steps < 1:
+        parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
 
     # ---------------------------------------------------------
     # Reject missing resume inputs before streaming datasets or
@@ -379,6 +387,7 @@ def main() -> None:
         precision=precision,
         callbacks=callbacks,
         logger=metrics_logger,
+        accumulate_grad_batches=args.gradient_accumulation_steps,
         log_every_n_steps=args.metric_log_every_n_steps,
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.val_batches,
@@ -414,6 +423,9 @@ def main() -> None:
         "num_heads": args.num_heads,
         "d_ff": args.d_ff,
         "learning_rate": args.learning_rate,
+        "batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
         "lr_schedule": "warmup_cosine",
         "lr_warmup_steps": args.lr_warmup_steps,
         "min_learning_rate": min_learning_rate,
