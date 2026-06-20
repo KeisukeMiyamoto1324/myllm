@@ -4,12 +4,12 @@ from pathlib import Path
 import lightning as L
 import torch
 from lightning.pytorch.callbacks import Callback
-from rich.console import Console
 from rich.table import Table
 from torch.utils.data import Dataset
-from tqdm.auto import tqdm
 
 from src.inference_base.generation import generate_token_ids
+from src.shared.console import console
+from src.shared.console import progress_manager
 from src.shared.model.transformer import DecoderOnlyTransformer
 from src.shared.packed_dataset import PackedTrainingExample
 from src.shared.tokenizer import ByteLevelBPE
@@ -34,7 +34,6 @@ class ValidationGenerationCallback(Callback):
         self.max_new_tokens = max_new_tokens
         self.preview_count = preview_count
         self.preview_characters = preview_characters
-        self.console = Console()
 
     def on_validation_epoch_end(
         self,
@@ -45,55 +44,58 @@ class ValidationGenerationCallback(Callback):
         # Generate deterministic continuations for every validation
         # sample and store one complete JSONL file per global step.
         # ---------------------------------------------------------
+        if not trainer.is_global_zero:
+            return
+
         model = pl_module
         output_path = self.output_dir / f"step-{trainer.global_step}.jsonl"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         preview_texts: list[str] = []
+        task_id = progress_manager.add_task(
+            description="Validation generation",
+            total=len(self.dataset),
+        )
 
-        with output_path.open("w", encoding="utf-8") as output_file:
-            progress_bar = tqdm(
-                range(len(self.dataset)),
-                desc="Validation generation",
-                unit="sample",
-                dynamic_ncols=True,
-                disable=not trainer.is_global_zero,
-            )
+        try:
+            with output_path.open("w", encoding="utf-8") as output_file:
+                for sample_index in range(len(self.dataset)):
+                    input_ids, _, _, segment_ids = self.dataset[sample_index]
+                    prompt_ids = self._build_prompt_ids(
+                        input_ids=input_ids,
+                        segment_ids=segment_ids,
+                    )
+                    generated_ids = self._generate_ids(
+                        trainer=trainer,
+                        model=model,
+                        prompt_ids=prompt_ids,
+                    )
+                    prompt_text = self.tokenizer.detokenize(prompt_ids)
+                    generated_text = self.tokenizer.detokenize(generated_ids).strip()
+                    result = {
+                        "sample_index": sample_index,
+                        "global_step": trainer.global_step,
+                        "prompt": prompt_text,
+                        "generated_text": generated_text,
+                        "generated_token_ids": generated_ids,
+                    }
+                    output_file.write(json.dumps(result, ensure_ascii=False) + "\n")
 
-            for sample_index in progress_bar:
-                input_ids, _, _, segment_ids = self.dataset[sample_index]
-                prompt_ids = self._build_prompt_ids(
-                    input_ids=input_ids,
-                    segment_ids=segment_ids,
-                )
-                generated_ids = self._generate_ids(
-                    trainer=trainer,
-                    model=model,
-                    prompt_ids=prompt_ids,
-                )
-                prompt_text = self.tokenizer.detokenize(prompt_ids)
-                generated_text = self.tokenizer.detokenize(generated_ids).strip()
-                result = {
-                    "sample_index": sample_index,
-                    "global_step": trainer.global_step,
-                    "prompt": prompt_text,
-                    "generated_text": generated_text,
-                    "generated_token_ids": generated_ids,
-                }
-                output_file.write(json.dumps(result, ensure_ascii=False) + "\n")
+                    if sample_index < self.preview_count:
+                        preview_texts.append(generated_text[: self.preview_characters])
 
-                if sample_index < self.preview_count:
-                    preview_texts.append(generated_text[: self.preview_characters])
+                    progress_manager.update(task_id=task_id, advance=1)
+        finally:
+            progress_manager.finish_task(task_id=task_id)
 
         # ---------------------------------------------------------
         # Print only the first few generated continuations in a
         # compact table while preserving every result in JSONL.
         # ---------------------------------------------------------
-        if trainer.is_global_zero:
-            self._print_previews(
-                global_step=trainer.global_step,
-                preview_texts=preview_texts,
-                output_path=output_path,
-            )
+        self._print_previews(
+            global_step=trainer.global_step,
+            preview_texts=preview_texts,
+            output_path=output_path,
+        )
 
     def _build_prompt_ids(
         self,
@@ -156,5 +158,5 @@ class ValidationGenerationCallback(Callback):
         for sample_index, generated_text in enumerate(preview_texts):
             table.add_row(str(sample_index), generated_text)
 
-        self.console.print(table)
-        self.console.print(f"Saved validation generations: {output_path}")
+        console.print(table)
+        console.print(f"Saved validation generations: {output_path}")

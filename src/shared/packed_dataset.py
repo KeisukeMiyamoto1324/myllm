@@ -4,13 +4,13 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from tqdm import tqdm
 from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
 
 from src.shared.tokenizer import ByteLevelBPE
 from src.shared.training_corpus import TrainingCorpusCase
+from src.shared.console import progress_manager
 
 
 PackedTrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
@@ -367,19 +367,23 @@ def build_tokenized_cache(
     # Consume exactly the configured validation budget and stop
     # before extra remote samples are streamed or tokenized.
     # ---------------------------------------------------------
-    progress_bar = tqdm(total=num_samples, desc="Building validation cache", unit="sample")
+    task_id = progress_manager.add_task(
+        description="Building validation cache",
+        total=num_samples,
+    )
 
-    for input_ids, label_ids, example_position_ids, example_segment_ids in dataset:
-        inputs.append(input_ids)
-        labels.append(label_ids)
-        position_ids.append(example_position_ids)
-        segment_ids.append(example_segment_ids)
-        progress_bar.update(1)
+    try:
+        for input_ids, label_ids, example_position_ids, example_segment_ids in dataset:
+            inputs.append(input_ids)
+            labels.append(label_ids)
+            position_ids.append(example_position_ids)
+            segment_ids.append(example_segment_ids)
+            progress_manager.update(task_id=task_id, advance=1)
 
-        if len(inputs) == num_samples:
-            break
-
-    progress_bar.close()
+            if len(inputs) == num_samples:
+                break
+    finally:
+        progress_manager.finish_task(task_id=task_id)
 
     # ---------------------------------------------------------
     # Fail loudly when the source stream cannot provide the

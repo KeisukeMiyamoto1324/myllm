@@ -3,13 +3,14 @@ from typing import Any
 import lightning as L
 import torch
 from lightning.pytorch.callbacks import Callback
-from tqdm.auto import tqdm
+
+from src.shared.console import progress_manager
 
 
 class FullTrainingProgressBar(Callback):
     def __init__(self) -> None:
         super().__init__()
-        self.progress_bar: tqdm | None = None
+        self.task_id: int | None = None
 
     def on_fit_start(
         self,
@@ -21,13 +22,14 @@ class FullTrainingProgressBar(Callback):
         # ETA represents the remaining time for the complete run.
         # ---------------------------------------------------------
         del pl_module
-        self.progress_bar = tqdm(
+
+        if not trainer.is_global_zero:
+            return
+
+        self.task_id = progress_manager.add_task(
+            description="Full training",
             total=trainer.max_steps,
-            initial=trainer.global_step,
-            desc="Full training",
-            unit="step",
-            dynamic_ncols=True,
-            disable=not trainer.is_global_zero,
+            completed=trainer.global_step,
         )
 
     def on_train_batch_end(
@@ -44,14 +46,13 @@ class FullTrainingProgressBar(Callback):
         # ---------------------------------------------------------
         del pl_module, outputs, batch, batch_idx
 
-        if self.progress_bar is None:
+        if self.task_id is None or not trainer.is_global_zero:
             return
 
-        completed_steps = trainer.global_step - self.progress_bar.n
-
-        if completed_steps > 0:
-            self.progress_bar.update(completed_steps)
-
+        progress_manager.update(
+            task_id=self.task_id,
+            completed=trainer.global_step,
+        )
         self._update_metrics(trainer=trainer)
 
     def on_validation_epoch_end(
@@ -75,23 +76,26 @@ class FullTrainingProgressBar(Callback):
         # Close the full-run progress bar after the current training
         # stage and its validation work have completed.
         # ---------------------------------------------------------
-        del trainer, pl_module
+        del pl_module
 
-        if self.progress_bar is not None:
-            self.progress_bar.close()
+        if self.task_id is not None and trainer.is_global_zero:
+            progress_manager.finish_task(task_id=self.task_id)
 
     def _update_metrics(self, trainer: L.Trainer) -> None:
         # ---------------------------------------------------------
-        # Format Lightning metrics for the tqdm postfix so values
-        # logged with prog_bar remain visible on the shared bar.
+        # Format Lightning metrics so values logged with prog_bar
+        # remain visible on the shared Rich progress row.
         # ---------------------------------------------------------
-        if self.progress_bar is None:
+        if self.task_id is None or not trainer.is_global_zero:
             return
 
-        metrics = {
-            name: f"{value.item():.3f}" if isinstance(value, torch.Tensor) else f"{float(value):.3f}"
+        metrics = [
+            f"{name}={value.item():.3f}" if isinstance(value, torch.Tensor) else f"{name}={float(value):.3f}"
             for name, value in trainer.progress_bar_metrics.items()
             if name in {"train_loss", "val_loss"}
-        }
+        ]
 
-        self.progress_bar.set_postfix(metrics, refresh=True)
+        progress_manager.update(
+            task_id=self.task_id,
+            metrics=" ".join(metrics),
+        )

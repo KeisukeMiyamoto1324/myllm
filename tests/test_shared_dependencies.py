@@ -49,6 +49,20 @@ class SharedDependenciesTest(unittest.TestCase):
 
         self.assertEqual(invalid_imports, [])
 
+    def test_source_uses_shared_rich_progress(self) -> None:
+        # ---------------------------------------------------------
+        # Prevent direct tqdm usage from bypassing the shared Rich
+        # console and creating competing terminal live displays.
+        # ---------------------------------------------------------
+        source_paths = Path("src").rglob("*.py")
+        tqdm_imports = [
+            str(source_path)
+            for source_path in source_paths
+            if "tqdm" in source_path.read_text(encoding="utf-8")
+        ]
+
+        self.assertEqual(tqdm_imports, [])
+
 
 if __name__ == "__main__":
     unittest.main()

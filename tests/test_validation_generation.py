@@ -62,7 +62,7 @@ class ValidationGenerationCallbackTest(unittest.TestCase):
             )
             trainer = MagicMock()
             trainer.global_step = 1000
-            trainer.is_global_zero = False
+            trainer.is_global_zero = True
 
             with patch.object(callback, "_generate_ids", return_value=[40, 41]):
                 callback.on_validation_epoch_end(

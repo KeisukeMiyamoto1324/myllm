@@ -2,6 +2,7 @@ import argparse
 
 from src.inference_base.generation import generate_continuation_text
 from src.inference_base.generation import resolve_torch_dtype
+from src.shared.console import console
 from src.shared.device_utils import resolve_device
 from src.shared.pytorch_artifacts import load_pytorch_model
 from src.shared.pytorch_artifacts import resolve_model_dir
@@ -53,4 +54,4 @@ def run_inference(args: argparse.Namespace) -> None:
         repetition_penalty=args.repetition_penalty,
         no_repeat_ngram_size=args.no_repeat_ngram_size,
     )
-    print(f"model> {generated_text}")
+    console.print(f"[bold cyan]model>[/bold cyan] {generated_text}")

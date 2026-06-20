@@ -1,8 +1,8 @@
 from collections.abc import Iterator
 
 from datasets import load_dataset
-from tqdm import tqdm
 
+from src.shared.console import progress_manager
 from src.tokenizer.training_corpus_cases import TrainingCorpusCase
 
 
@@ -17,20 +17,25 @@ def stream_corpus_texts(corpus_case: TrainingCorpusCase) -> Iterator[str]:
         split=corpus_case.split,
         streaming=True,
     )
-    progress = tqdm(total=corpus_case.sample_count, desc=corpus_case.name)
+    task_id = progress_manager.add_task(
+        description=corpus_case.name,
+        total=corpus_case.sample_count,
+    )
 
     # ---------------------------------------------------------
     # Yield samples one by one so the tokenizer trainer can
     # consume large datasets without materializing all text.
     # ---------------------------------------------------------
-    for row in dataset.take(corpus_case.sample_count):
-        progress.update(1)
-        yield row[corpus_case.text_column][:corpus_case.max_chars]
-
-    # ---------------------------------------------------------
-    # Close the corpus progress bar after the stream is consumed.
-    # ---------------------------------------------------------
-    progress.close()
+    try:
+        for row in dataset.take(corpus_case.sample_count):
+            progress_manager.update(task_id=task_id, advance=1)
+            yield row[corpus_case.text_column][:corpus_case.max_chars]
+    finally:
+        # ---------------------------------------------------------
+        # Close the shared progress task when iteration completes or
+        # the tokenizer stops consuming the generator early.
+        # ---------------------------------------------------------
+        progress_manager.finish_task(task_id=task_id)
 
 
 def stream_training_texts(corpus_cases: list[TrainingCorpusCase]) -> Iterator[str]:
