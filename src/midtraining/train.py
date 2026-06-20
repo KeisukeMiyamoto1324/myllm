@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=str, required=True)
     parser.add_argument("--max-len", type=int, default=None)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--batch-size", type=int, default=80)
+    parser.add_argument("--batch-size", type=int, default=72)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--max-steps", type=int, default=21600)
     parser.add_argument("--num-workers", type=int, default=4)
