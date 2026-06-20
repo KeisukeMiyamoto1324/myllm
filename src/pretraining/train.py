@@ -19,6 +19,7 @@ from src.shared.packed_dataset import LocalTokenizedDataset
 from src.shared.packed_dataset import PackedCorpusDataset
 from src.shared.device_utils import resolve_accelerator, resolve_precision
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
+from src.shared.training_progress import FullTrainingProgressBar
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
 from src.pretraining.training_corpus_cases import serialize_pretraining_corpus_case
@@ -347,6 +348,7 @@ def main() -> None:
     # so training progress can be resumed or selected later.
     # ---------------------------------------------------------
     callbacks = [
+        FullTrainingProgressBar(),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename="step-{step}",
@@ -392,6 +394,7 @@ def main() -> None:
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.val_batches,
         num_sanity_val_steps=0,
+        enable_progress_bar=False,
     )
 
     # ---------------------------------------------------------

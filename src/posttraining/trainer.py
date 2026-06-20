@@ -7,6 +7,7 @@ from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
 from src.shared.model.transformer import DecoderOnlyTransformer
+from src.shared.training_progress import FullTrainingProgressBar
 
 
 def build_trainer(
@@ -26,6 +27,7 @@ def build_trainer(
     # ---------------------------------------------------------
     checkpoint_dir = model_dir / "checkpoints" / stage_name
     callbacks = [
+        FullTrainingProgressBar(),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename="step-{step}",
@@ -64,6 +66,7 @@ def build_trainer(
         val_check_interval=val_check_interval,
         limit_val_batches=val_batches,
         num_sanity_val_steps=0,
+        enable_progress_bar=False,
     )
 
 

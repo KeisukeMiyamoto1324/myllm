@@ -26,6 +26,7 @@ from src.shared.pytorch_artifacts import load_model_config
 from src.shared.pytorch_artifacts import load_pytorch_model
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
 from src.shared.tokenizer import ByteLevelBPE
+from src.shared.training_progress import FullTrainingProgressBar
 
 from dotenv import load_dotenv
 
@@ -256,6 +257,7 @@ def main() -> None:
     # validation checkpoint, and batched CSV metrics.
     # ---------------------------------------------------------
     callbacks = [
+        FullTrainingProgressBar(),
         DatasetEpochCallback(dataset=train_dataset),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
@@ -292,6 +294,7 @@ def main() -> None:
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.val_batches,
         num_sanity_val_steps=0,
+        enable_progress_bar=False,
     )
     checkpoint_path = args.resume_from_checkpoint or None
     trainer.fit(
