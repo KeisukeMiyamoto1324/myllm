@@ -1,6 +1,7 @@
 from typing import Any
 
 import lightning as L
+import torch
 from lightning.pytorch.callbacks import Callback
 from tqdm.auto import tqdm
 
@@ -51,6 +52,20 @@ class FullTrainingProgressBar(Callback):
         if completed_steps > 0:
             self.progress_bar.update(completed_steps)
 
+        self._update_metrics(trainer=trainer)
+
+    def on_validation_epoch_end(
+        self,
+        trainer: L.Trainer,
+        pl_module: L.LightningModule,
+    ) -> None:
+        # ---------------------------------------------------------
+        # Add the latest aggregated validation loss while retaining
+        # the current training loss beside the full-run ETA.
+        # ---------------------------------------------------------
+        del pl_module
+        self._update_metrics(trainer=trainer)
+
     def on_fit_end(
         self,
         trainer: L.Trainer,
@@ -64,3 +79,19 @@ class FullTrainingProgressBar(Callback):
 
         if self.progress_bar is not None:
             self.progress_bar.close()
+
+    def _update_metrics(self, trainer: L.Trainer) -> None:
+        # ---------------------------------------------------------
+        # Format Lightning metrics for the tqdm postfix so values
+        # logged with prog_bar remain visible on the shared bar.
+        # ---------------------------------------------------------
+        if self.progress_bar is None:
+            return
+
+        metrics = {
+            name: f"{value.item():.3f}" if isinstance(value, torch.Tensor) else f"{float(value):.3f}"
+            for name, value in trainer.progress_bar_metrics.items()
+            if name in {"train_loss", "val_loss"}
+        }
+
+        self.progress_bar.set_postfix(metrics, refresh=True)
