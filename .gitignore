@@ -9,3 +9,4 @@ model-10m/checkpoints/
 *.ckpt
 *.pth
 .pytest_cache/
+docs/
