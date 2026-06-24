@@ -1,12 +1,26 @@
 # lambda
 
-A minimal decoder-only Transformer project built with PyTorch and Lightning.
+A small decoder-only Transformer project built with PyTorch and Lightning.
 
-This repository includes a small from-scratch implementation for training and inference, mainly for learning and experimentation.
-
+It includes tokenizer training, pretraining, midtraining, posttraining, and inference code.
 
 ## Setup
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
+```
+
+## Usage
+
+```bash
+python3 src/tokenizer/train.py
+python3 src/pretraining/train.py
+python3 src/midtraining/train.py --model-path "model file path"
+python3 src/inference_base/inference.py --prompt "Hello"
+```
+
+## Test
+
+```bash
+python3 -m pytest
 ```
