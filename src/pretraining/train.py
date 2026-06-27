@@ -143,7 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--d-ff", type=int, default=3072)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--lr-warmup-steps", type=int, default=2000)
-    parser.add_argument("--min-learning-rate-ratio", type=float, default=0.5)
+    parser.add_argument("--min-learning-rate-ratio", type=float, default=0.2)
     parser.add_argument("--batch-size", type=int, default=96)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=10240)
