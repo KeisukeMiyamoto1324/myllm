@@ -16,7 +16,7 @@ def parse_args(default_model_dir: Path) -> argparse.Namespace:
     parser.add_argument("--prompt", "--promot", type=str, default="")
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--do-sample", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--temperature", type=positive_float, default=1)
+    parser.add_argument("--temperature", type=positive_float, default=0.7)
     parser.add_argument("--top-p", type=probability_float, default=0.85)
     parser.add_argument("--top-k", type=non_negative_int, default=8)
     parser.add_argument("--repetition-penalty", type=positive_float, default=1.2)
