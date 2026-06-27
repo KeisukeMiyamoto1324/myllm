@@ -7,41 +7,56 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 
-from src.inference_base.cli import parse_args
-from src.inference_base.generation import generate_continuation_text
-from src.inference_base.generation import generate_token_ids
-from src.inference_base.generation import resolve_torch_dtype
+from src.inference_it.cli import parse_args
+from src.inference_it.generation import build_chat_input_ids
+from src.inference_it.generation import generate_chat_response
+from src.inference_it.generation import generate_token_ids
+from src.inference_it.generation import resolve_torch_dtype
+from src.posttraining.chat_template import ChatMessage
 from src.shared.model.kv_cache import KeyValueCache
 
 
 class FakeTokenizer:
     bos_token = "|<bos>|"
     eos_token = "|<eos>|"
+    system_token = "|<system>|"
+    user_token = "|<user>|"
+    assistant_token = "|<assistant>|"
+    end_of_turn_token = "|<end_of_turn>|"
 
     def __init__(self) -> None:
         # ---------------------------------------------------------
         # Store generated decode input for assertions after the
-        # helper returns continuation text.
+        # helper returns assistant response text.
         # ---------------------------------------------------------
         self.decoded_ids: list[int] = []
+        self.prompts: list[str] = []
 
     def token_to_id(self, token: str) -> int:
         # ---------------------------------------------------------
-        # Return stable ids for generation special tokens.
+        # Return stable ids for chat and generation special tokens.
         # ---------------------------------------------------------
         token_ids = {
             self.bos_token: 1,
             self.eos_token: 2,
+            self.user_token: 3,
+            self.assistant_token: 4,
+            self.end_of_turn_token: 5,
+            self.system_token: 6,
         }
         return token_ids[token]
 
     def tokenize(self, sentence: str) -> list[int]:
         # ---------------------------------------------------------
-        # Return a fixed prompt so tests can verify continuation
-        # decoding receives only newly generated ids.
+        # Return fixed content token ids so tests can verify the
+        # serialized chat template order.
         # ---------------------------------------------------------
-        self.prompt = sentence
-        return [10, 11, 12]
+        self.prompts.append(sentence)
+        token_ids_by_sentence = {
+            "hello": [10, 11],
+            "hi": [12],
+        }
+        return token_ids_by_sentence[sentence]
 
     def detokenize(self, token_ids: list[int]) -> str:
         # ---------------------------------------------------------
@@ -81,17 +96,34 @@ class FakeModel(nn.Module):
 
 
 class InferenceItTest(unittest.TestCase):
-    def test_generate_continuation_text_uses_pytorch_cache_generation(self) -> None:
+    def test_build_chat_input_ids_applies_chat_template(self) -> None:
         # ---------------------------------------------------------
-        # Verify direct prompt continuation uses the PyTorch cache
-        # path and decodes only newly generated tokens.
+        # Serialize user and assistant turns with role markers,
+        # content tokens, and end-of-turn markers.
+        # ---------------------------------------------------------
+        tokenizer = FakeTokenizer()
+        input_ids = build_chat_input_ids(
+            tokenizer=tokenizer,
+            messages=[
+                ChatMessage(role="user", content="hello"),
+                ChatMessage(role="assistant", content="hi"),
+            ],
+        )
+
+        self.assertEqual(input_ids, [1, 3, 10, 11, 5, 4, 12, 5, 4])
+        self.assertEqual(tokenizer.prompts, ["hello", "hi"])
+
+    def test_generate_chat_response_uses_chat_template_generation(self) -> None:
+        # ---------------------------------------------------------
+        # Verify chat generation uses the PyTorch cache path and
+        # decodes only assistant response tokens.
         # ---------------------------------------------------------
         model = FakeModel(next_token_ids=[13, 14])
         tokenizer = FakeTokenizer()
-        text = generate_continuation_text(
+        text = generate_chat_response(
             model=model,
             tokenizer=tokenizer,
-            prompt="prompt",
+            messages=[ChatMessage(role="user", content="hello")],
             max_new_tokens=2,
             do_sample=False,
             temperature=0.7,
@@ -102,16 +134,15 @@ class InferenceItTest(unittest.TestCase):
         )
 
         self.assertEqual(text, "continuation text")
-        self.assertEqual(tokenizer.prompt, "prompt")
         self.assertEqual(tokenizer.decoded_ids, [13, 14])
-        self.assertEqual(model.calls, [[1, 10, 11, 12], [13]])
+        self.assertEqual(model.calls, [[1, 3, 10, 11, 5, 4], [13]])
 
-    def test_generate_token_ids_stops_on_eos(self) -> None:
+    def test_generate_token_ids_stops_on_end_of_turn(self) -> None:
         # ---------------------------------------------------------
-        # Stop generation as soon as EOS is selected so the caller
-        # does not produce extra tokens.
+        # Stop generation as soon as the chat end-of-turn marker is
+        # selected so the next user turn can begin cleanly.
         # ---------------------------------------------------------
-        model = FakeModel(next_token_ids=[13, 2, 14])
+        model = FakeModel(next_token_ids=[13, 5, 14])
         input_ids = torch.tensor([[1, 10]], dtype=torch.long)
         generated_ids = generate_token_ids(
             model=model,
@@ -123,15 +154,15 @@ class InferenceItTest(unittest.TestCase):
             top_k=0,
             repetition_penalty=1.0,
             no_repeat_ngram_size=0,
-            eos_token_id=2,
+            stop_token_ids={2, 5},
         )
 
-        self.assertEqual(generated_ids, [13, 2])
+        self.assertEqual(generated_ids, [13, 5])
 
     def test_parse_args_uses_pytorch_generation_defaults(self) -> None:
         # ---------------------------------------------------------
-        # Keep instruction inference defaults aligned with the
-        # native PyTorch generation path.
+        # Keep instruction chat defaults aligned with the native
+        # PyTorch generation path.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             argv = [
@@ -189,6 +220,18 @@ class InferenceItTest(unittest.TestCase):
         self.assertEqual(resolve_torch_dtype("float16"), torch.float16)
         self.assertEqual(resolve_torch_dtype("bfloat16"), torch.bfloat16)
         self.assertEqual(resolve_torch_dtype("float32"), torch.float32)
+
+    def test_parse_args_defaults_to_posttraining_model_dir(self) -> None:
+        # ---------------------------------------------------------
+        # Use the local instruction-tuned artifact path by default
+        # for terminal chat.
+        # ---------------------------------------------------------
+        argv = ["inference.py"]
+
+        with patch("sys.argv", argv):
+            args = parse_args(default_model_dir=Path("models/lambda-1-160m-it"))
+
+        self.assertEqual(args.model_dir, "models/lambda-1-160m-it")
 
 
 if __name__ == "__main__":
