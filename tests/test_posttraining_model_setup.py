@@ -15,6 +15,7 @@ from src.posttraining.model_setup import DEFAULT_BASE_MODEL_ID
 from src.posttraining.model_setup import download_base_model
 from src.posttraining.model_setup import load_base_model
 from src.posttraining.train import parse_args
+from src.posttraining.trainer import build_trainer
 from src.shared.model.transformer import DecoderOnlyTransformer
 
 
@@ -278,6 +279,27 @@ class PosttrainingModelSetupTest(unittest.TestCase):
             )
 
         self.assertEqual(max_steps, 9)
+
+    def test_build_trainer_validates_by_global_step(self) -> None:
+        # ---------------------------------------------------------
+        # Allow validation intervals larger than one epoch by using
+        # Lightning's global-step validation mode.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trainer = build_trainer(
+                model_dir=Path(temp_dir),
+                stage_name="ichikara",
+                max_steps=723,
+                accelerator="cpu",
+                precision="32-true",
+                val_check_interval=500,
+                val_batches=8,
+                checkpoint_every_n_steps=1000,
+                metric_log_every_n_steps=50,
+            )
+
+        self.assertIsNone(trainer.check_val_every_n_epoch)
+        self.assertEqual(trainer.val_check_interval, 500)
 
 
 if __name__ == "__main__":

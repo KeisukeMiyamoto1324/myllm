@@ -53,7 +53,7 @@ def build_trainer(
 
     # ---------------------------------------------------------
     # Return a Lightning trainer that runs a bounded number of
-    # optimizer steps for the requested SFT stage.
+    # optimizer steps and validates by global training step.
     # ---------------------------------------------------------
     return L.Trainer(
         max_steps=max_steps,
@@ -64,6 +64,7 @@ def build_trainer(
         logger=metrics_logger,
         log_every_n_steps=metric_log_every_n_steps,
         val_check_interval=val_check_interval,
+        check_val_every_n_epoch=None,
         limit_val_batches=val_batches,
         num_sanity_val_steps=0,
         enable_progress_bar=False,
