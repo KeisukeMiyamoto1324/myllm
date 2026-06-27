@@ -1,10 +1,10 @@
 import argparse
 
 
-def validate_step_budget(args: argparse.Namespace) -> None:
+def validate_repeat_epochs(args: argparse.Namespace) -> None:
     # ---------------------------------------------------------
-    # Keep the explicit stage budgets aligned with the advertised
-    # total budget so command-line mistakes fail before training.
+    # Reject invalid epoch counts before loading the model or
+    # materializing the SFT dataset.
     # ---------------------------------------------------------
-    if args.magpie_steps + args.everyday_steps != args.max_steps:
-        raise ValueError("magpie_steps plus everyday_steps must equal max_steps")
+    if args.repeat_epochs <= 0:
+        raise ValueError("repeat_epochs must be positive")

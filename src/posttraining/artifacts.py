@@ -4,11 +4,9 @@ from pathlib import Path
 
 import torch
 
-from src.posttraining.dataset import EVERYDAY_DATASET_PATH
-from src.posttraining.dataset import EVERYDAY_TRAIN_SPLIT
-from src.posttraining.dataset import EVERYDAY_VALIDATION_SPLIT
-from src.posttraining.dataset import MAGPIE_DATASET_PATH
-from src.posttraining.dataset import MAGPIE_DATASET_SPLIT
+from src.posttraining.dataset import ICHIKARA_DATASET_PATH
+from src.posttraining.dataset import ICHIKARA_TRAIN_SPLIT
+from src.posttraining.dataset import ICHIKARA_VALIDATION_SPLIT
 from src.shared.model.transformer import DecoderOnlyTransformer
 
 
@@ -44,12 +42,11 @@ def save_chat_model(
         "trainable_layers": "all",
         "chat_template_version": 1,
         "posttraining_datasets": [
-            f"{MAGPIE_DATASET_PATH}:{MAGPIE_DATASET_SPLIT}",
-            f"{EVERYDAY_DATASET_PATH}:{EVERYDAY_TRAIN_SPLIT}",
+            f"{ICHIKARA_DATASET_PATH}:{ICHIKARA_TRAIN_SPLIT}",
         ],
-        "validation_dataset": f"{EVERYDAY_DATASET_PATH}:{EVERYDAY_VALIDATION_SPLIT}",
-        "magpie_steps": args.magpie_steps,
-        "everyday_steps": args.everyday_steps,
+        "validation_dataset": f"{ICHIKARA_DATASET_PATH}:{ICHIKARA_VALIDATION_SPLIT}",
+        "repeat_epochs": args.repeat_epochs,
+        "posttraining_steps": args.posttraining_steps,
     }
 
     with open(model_dir / "model_config.json", "w") as f:

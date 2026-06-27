@@ -1,9 +1,8 @@
 from torch.utils.data import DataLoader
 
-from src.posttraining.dataset import EVERYDAY_TRAIN_SPLIT
-from src.posttraining.dataset import EVERYDAY_VALIDATION_SPLIT
-from src.posttraining.dataset import EverydayChatDataset
-from src.posttraining.dataset import MagpieChatDataset
+from src.posttraining.dataset import ICHIKARA_TRAIN_SPLIT
+from src.posttraining.dataset import ICHIKARA_VALIDATION_SPLIT
+from src.posttraining.dataset import IchikaraInstructionDataset
 from src.shared.tokenizer import ByteLevelBPE
 
 
@@ -13,7 +12,8 @@ def build_dataloaders(
     batch_size: int,
     num_workers: int,
     accelerator: str,
-) -> tuple[DataLoader, DataLoader, DataLoader]:
+    repeat_epochs: int,
+) -> tuple[DataLoader, DataLoader, int]:
     # ---------------------------------------------------------
     # Resolve tokenizer ids shared by both SFT datasets and the
     # Transformer loss masking convention.
@@ -24,29 +24,21 @@ def build_dataloaders(
     end_of_turn_token_id = tokenizer.token_to_id(tokenizer.end_of_turn_token)
 
     # ---------------------------------------------------------
-    # Build broad Magpie training, high-quality Everyday finishing,
-    # and fixed Everyday validation datasets.
+    # Build fixed Ichikara train and validation datasets from the
+    # official train/test splits.
     # ---------------------------------------------------------
-    magpie_dataset = MagpieChatDataset(
+    train_dataset = IchikaraInstructionDataset(
         tokenizer=tokenizer,
+        split=ICHIKARA_TRAIN_SPLIT,
         max_len=max_len,
         pad_token_id=pad_token_id,
         bos_token_id=bos_token_id,
         eos_token_id=eos_token_id,
         end_of_turn_token_id=end_of_turn_token_id,
     )
-    everyday_train_dataset = EverydayChatDataset(
+    validation_dataset = IchikaraInstructionDataset(
         tokenizer=tokenizer,
-        split=EVERYDAY_TRAIN_SPLIT,
-        max_len=max_len,
-        pad_token_id=pad_token_id,
-        bos_token_id=bos_token_id,
-        eos_token_id=eos_token_id,
-        end_of_turn_token_id=end_of_turn_token_id,
-    )
-    everyday_validation_dataset = EverydayChatDataset(
-        tokenizer=tokenizer,
-        split=EVERYDAY_VALIDATION_SPLIT,
+        split=ICHIKARA_VALIDATION_SPLIT,
         max_len=max_len,
         pad_token_id=pad_token_id,
         bos_token_id=bos_token_id,
@@ -60,26 +52,20 @@ def build_dataloaders(
     # Wrap datasets with DataLoaders configured consistently with
     # the existing pretraining pipeline.
     # ---------------------------------------------------------
-    magpie_dataloader = DataLoader(
-        magpie_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=use_pin_memory,
-        persistent_workers=use_persistent_workers,
-    )
-    everyday_train_dataloader = DataLoader(
-        everyday_train_dataset,
+    train_dataloader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=use_pin_memory,
         persistent_workers=use_persistent_workers,
     )
-    everyday_validation_dataloader = DataLoader(
-        everyday_validation_dataset,
+    validation_dataloader = DataLoader(
+        validation_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=use_pin_memory,
         persistent_workers=use_persistent_workers,
     )
-    return magpie_dataloader, everyday_train_dataloader, everyday_validation_dataloader
+    max_steps = len(train_dataloader) * repeat_epochs
+    return train_dataloader, validation_dataloader, max_steps

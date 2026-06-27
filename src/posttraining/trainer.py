@@ -78,7 +78,7 @@ def fit_stage(
 ) -> None:
     # ---------------------------------------------------------
     # Run one trainer stage against the supplied train stream and
-    # shared Everyday validation set.
+    # shared validation set.
     # ---------------------------------------------------------
     trainer.fit(
         model,

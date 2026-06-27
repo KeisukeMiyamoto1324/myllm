@@ -6,8 +6,11 @@ import unittest
 from unittest.mock import patch
 
 import torch
+from torch.utils.data import Dataset
 
 from src.posttraining.artifacts import save_chat_model
+from src.posttraining.dataloaders import build_dataloaders
+from src.posttraining.dataset import IchikaraInstructionDataset
 from src.posttraining.model_setup import DEFAULT_BASE_MODEL_ID
 from src.posttraining.model_setup import download_base_model
 from src.posttraining.model_setup import load_base_model
@@ -19,6 +22,7 @@ class FakeTokenizer:
     pad_token = "|<pad>|"
     bos_token = "|<bos>|"
     eos_token = "|<eos>|"
+    end_of_turn_token = "|<end_of_turn>|"
 
     def get_vocab_size(self) -> int:
         # ---------------------------------------------------------
@@ -35,8 +39,33 @@ class FakeTokenizer:
             self.pad_token: 0,
             self.bos_token: 1,
             self.eos_token: 2,
+            self.end_of_turn_token: 3,
         }
         return token_ids[token]
+
+
+class FakeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    def __init__(self, size: int) -> None:
+        # ---------------------------------------------------------
+        # Store a fixed dataset size so dataloader step math can be
+        # tested without loading the remote SFT dataset.
+        # ---------------------------------------------------------
+        self.size = size
+
+    def __len__(self) -> int:
+        # ---------------------------------------------------------
+        # Return the configured number of examples.
+        # ---------------------------------------------------------
+        return self.size
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        # ---------------------------------------------------------
+        # Return one tiny tensor pair for DataLoader construction.
+        # ---------------------------------------------------------
+        del index
+        tensor = torch.tensor([1], dtype=torch.long)
+        return tensor, tensor
+
 
 class PosttrainingModelSetupTest(unittest.TestCase):
     def test_parse_args_uses_lambda_hub_model_default(self) -> None:
@@ -48,6 +77,16 @@ class PosttrainingModelSetupTest(unittest.TestCase):
             args = parse_args()
 
         self.assertEqual(args.base_model_id, DEFAULT_BASE_MODEL_ID)
+
+    def test_parse_args_uses_three_ichikara_repeat_epochs(self) -> None:
+        # ---------------------------------------------------------
+        # Use three passes over Ichikara as the default posttraining
+        # budget instead of a fixed two-stage step budget.
+        # ---------------------------------------------------------
+        with patch("sys.argv", ["train.py"]):
+            args = parse_args()
+
+        self.assertEqual(args.repeat_epochs, 3)
 
     def test_download_base_model_uses_hub_snapshot(self) -> None:
         # ---------------------------------------------------------
@@ -153,8 +192,8 @@ class PosttrainingModelSetupTest(unittest.TestCase):
                 max_len=8,
                 learning_rate=5e-5,
                 base_model_id=DEFAULT_BASE_MODEL_ID,
-                magpie_steps=1,
-                everyday_steps=1,
+                repeat_epochs=3,
+                posttraining_steps=9,
             )
             model_config = {
                 "max_len": 16,
@@ -185,7 +224,60 @@ class PosttrainingModelSetupTest(unittest.TestCase):
         self.assertEqual(payload["base_model_id"], DEFAULT_BASE_MODEL_ID)
         self.assertEqual(payload["training_max_len"], 8)
         self.assertEqual(payload["trainable_layers"], "all")
+        self.assertEqual(payload["posttraining_datasets"], ["msfm/ichikara-instruction-all:train"])
+        self.assertEqual(payload["validation_dataset"], "msfm/ichikara-instruction-all:test")
+        self.assertEqual(payload["repeat_epochs"], 3)
+        self.assertEqual(payload["posttraining_steps"], 9)
         self.assertTrue(model_path_exists)
+
+    def test_ichikara_dataset_maps_text_and_output_to_chat_messages(self) -> None:
+        # ---------------------------------------------------------
+        # Convert Ichikara text/output columns into the user and
+        # assistant roles expected by the shared chat template.
+        # ---------------------------------------------------------
+        sample = {"text": "質問", "output": "回答", "ID": "id-1", "category": 1}
+
+        with patch("src.posttraining.dataset.load_dataset", return_value=[sample]) as mocked_load:
+            with patch(
+                "src.posttraining.dataset.build_tensor_example",
+                return_value=(torch.tensor([1]), torch.tensor([2])),
+            ) as mocked_build:
+                dataset = IchikaraInstructionDataset(
+                    tokenizer=FakeTokenizer(),
+                    split="train",
+                    max_len=8,
+                    pad_token_id=0,
+                    bos_token_id=1,
+                    eos_token_id=2,
+                    end_of_turn_token_id=3,
+                )
+
+        messages = mocked_build.call_args.kwargs["messages"]
+        mocked_load.assert_called_once_with(path="msfm/ichikara-instruction-all", split="train")
+        self.assertEqual(len(dataset), 1)
+        self.assertEqual(messages[0].role, "user")
+        self.assertEqual(messages[0].content, "質問")
+        self.assertEqual(messages[1].role, "assistant")
+        self.assertEqual(messages[1].content, "回答")
+
+    def test_build_dataloaders_computes_three_epoch_steps(self) -> None:
+        # ---------------------------------------------------------
+        # Derive Lightning max_steps from dataloader length times
+        # repeat epochs so batch size changes keep epoch semantics.
+        # ---------------------------------------------------------
+        fake_datasets = [FakeDataset(size=5), FakeDataset(size=2)]
+
+        with patch("src.posttraining.dataloaders.IchikaraInstructionDataset", side_effect=fake_datasets):
+            _, _, max_steps = build_dataloaders(
+                tokenizer=FakeTokenizer(),
+                max_len=8,
+                batch_size=2,
+                num_workers=0,
+                accelerator="cpu",
+                repeat_epochs=3,
+            )
+
+        self.assertEqual(max_steps, 9)
 
 
 if __name__ == "__main__":
