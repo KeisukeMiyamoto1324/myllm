@@ -362,6 +362,28 @@ class PretrainingDatasetTest(unittest.TestCase):
         self.assertEqual(sorted(first_pass), list(range(10, 20)))
         self.assertEqual(sorted(second_pass), list(range(10, 20)))
 
+    def test_packed_corpus_repeat_stops_empty_worker_shard(self) -> None:
+        # ---------------------------------------------------------
+        # End an empty repeated worker shard instead of spinning
+        # forever without yielding examples.
+        # ---------------------------------------------------------
+        dataset = PretrainingCorpusDataset(
+            corpus_case=build_case(name="custom"),
+            tokenizer=FixedTokenizer(),
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+            repeat=True,
+        )
+        fake_dataset = FakeStreamingDataset(samples=[{"text": "10"}])
+        worker_info = type("WorkerInfo", (), {"num_workers": 2, "id": 1})()
+
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
+            with patch("src.shared.packed_dataset.get_worker_info", return_value=worker_info):
+                with self.assertRaises(StopIteration):
+                    next(iter(dataset))
+
     def test_build_tokenized_cache_keeps_metadata(self) -> None:
         # ---------------------------------------------------------
         # Store caller-provided corpus metadata beside validation

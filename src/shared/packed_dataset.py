@@ -63,10 +63,14 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
         repeat_index = 0
 
         while True:
-            yield from self._iter_corpus_pass(repeat_index=repeat_index)
+            yielded = False
 
-            if not self.repeat:
-                break
+            for example in self._iter_corpus_pass(repeat_index=repeat_index):
+                yielded = True
+                yield example
+
+            if not self.repeat or not yielded:
+                return
 
             repeat_index += 1
 
