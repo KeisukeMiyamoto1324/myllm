@@ -2,7 +2,9 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
+from src.shared.device_utils import is_global_zero_process
 from src.shared.device_utils import resolve_device
+from src.shared.device_utils import wait_for_file
 from src.shared.pytorch_artifacts import load_pytorch_model
 from src.shared.model.transformer import DecoderOnlyTransformer
 from src.shared.tokenizer import ByteLevelBPE
@@ -25,7 +27,13 @@ def build_tokenizer(base_model_dir: Path, output_path: Path) -> ByteLevelBPE:
     # artifacts as a Hugging Face tokenizer directory.
     # ---------------------------------------------------------
     tokenizer = ByteLevelBPE.load(base_model_dir)
-    tokenizer.save_pretrained(output_path)
+
+    if is_global_zero_process():
+        tokenizer.save_pretrained(output_path)
+
+    if not is_global_zero_process():
+        wait_for_file(path=output_path / "tokenizer.json")
+
     return tokenizer
 
 

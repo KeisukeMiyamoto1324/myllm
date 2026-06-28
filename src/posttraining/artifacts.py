@@ -39,6 +39,14 @@ def save_chat_model(
         "eos_token_id": eos_token_id,
         "end_of_turn_token_id": end_of_turn_token_id,
         "base_model_id": args.base_model_id,
+        "devices": getattr(args, "devices", "auto"),
+        "device_count": getattr(args, "device_count", 1),
+        "global_batch_size": getattr(args, "global_batch_size", getattr(args, "batch_size", 1)),
+        "global_effective_batch_size": getattr(
+            args,
+            "global_effective_batch_size",
+            getattr(args, "batch_size", 1),
+        ),
         "trainable_layers": "all",
         "chat_template_version": 1,
         "posttraining_datasets": [

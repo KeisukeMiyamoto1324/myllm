@@ -20,6 +20,8 @@ def build_trainer(
     val_batches: int,
     checkpoint_every_n_steps: int,
     metric_log_every_n_steps: int,
+    devices: int | str = 1,
+    strategy: str | None = None,
 ) -> L.Trainer:
     # ---------------------------------------------------------
     # Create callbacks and metrics logging for one SFT stage while
@@ -55,10 +57,11 @@ def build_trainer(
     # Return a Lightning trainer that runs a bounded number of
     # optimizer steps and validates by global training step.
     # ---------------------------------------------------------
+    strategy_kwargs = {"strategy": strategy} if strategy is not None else {}
     return L.Trainer(
         max_steps=max_steps,
         accelerator=accelerator,
-        devices=1,
+        devices=devices,
         precision=precision,
         callbacks=callbacks,
         logger=metrics_logger,
@@ -68,6 +71,7 @@ def build_trainer(
         limit_val_batches=val_batches,
         num_sanity_val_steps=0,
         enable_progress_bar=False,
+        **strategy_kwargs,
     )
 
 
@@ -96,9 +100,11 @@ def train_stage(
     train_dataloader: DataLoader,
     validation_dataloader: DataLoader,
     accelerator: str,
+    devices: int | str,
+    strategy: str | None,
     precision: str,
     args: argparse.Namespace,
-) -> None:
+) -> L.Trainer:
     # ---------------------------------------------------------
     # Build and execute one named SFT stage using the shared CLI
     # training controls for validation, checkpointing, and logging.
@@ -108,6 +114,8 @@ def train_stage(
         stage_name=stage_name,
         max_steps=max_steps,
         accelerator=accelerator,
+        devices=devices,
+        strategy=strategy,
         precision=precision,
         val_check_interval=args.val_check_interval,
         val_batches=args.val_batches,
@@ -120,3 +128,4 @@ def train_stage(
         train_dataloader=train_dataloader,
         validation_dataloader=validation_dataloader,
     )
+    return trainer

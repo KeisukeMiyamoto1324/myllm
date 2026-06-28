@@ -329,7 +329,7 @@ class DecoderOnlyTransformer(L.LightningModule):
             position_ids=position_ids,
             segment_ids=segment_ids,
         )
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
         return loss
 
     def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> torch.Tensor:
@@ -345,7 +345,7 @@ class DecoderOnlyTransformer(L.LightningModule):
             position_ids=position_ids,
             segment_ids=segment_ids,
         )
-        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         return loss
 
 

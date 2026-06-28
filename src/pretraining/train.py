@@ -17,7 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.shared.packed_dataset import build_tokenized_cache
 from src.shared.packed_dataset import LocalTokenizedDataset
 from src.shared.packed_dataset import PackedCorpusDataset
-from src.shared.device_utils import resolve_accelerator, resolve_precision
+from src.shared.device_utils import is_global_zero_process
+from src.shared.device_utils import resolve_accelerator
+from src.shared.device_utils import resolve_device_count
+from src.shared.device_utils import resolve_devices
+from src.shared.device_utils import resolve_precision
+from src.shared.device_utils import resolve_strategy
+from src.shared.device_utils import wait_for_file
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
 from src.shared.training_progress import FullTrainingProgressBar
 from src.shared.validation_generation import ValidationGenerationCallback
@@ -156,6 +162,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=2000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--loss-chunk-size", type=int, default=32)
+    parser.add_argument("--devices", type=str, default="auto")
     parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
     parser.add_argument("--output-path", type=str, default="models/lambda-160m")
     parser.add_argument("--push-to-hub", action="store_true")
@@ -178,6 +185,11 @@ def parse_args() -> argparse.Namespace:
 
     if args.gradient_accumulation_steps < 1:
         parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
+
+    try:
+        resolve_devices(devices=args.devices)
+    except ValueError as error:
+        parser.error(str(error))
 
     # ---------------------------------------------------------
     # Reject missing resume inputs before streaming datasets or
@@ -215,6 +227,9 @@ def main() -> None:
     args = parse_args()
     tokenizer = ByteLevelBPE.load(Path(args.tokenizer_path))
     accelerator = resolve_accelerator()
+    devices = resolve_devices(devices=args.devices)
+    device_count = resolve_device_count(accelerator=accelerator, devices=devices)
+    strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
 
     # ---------------------------------------------------------
@@ -225,7 +240,7 @@ def main() -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = model_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    validation_sample_count = args.batch_size * args.val_batches
+    validation_sample_count = args.batch_size * args.val_batches * device_count
     corpus_signature = build_corpus_signature(
         corpus_case=PRETRAINING_CORPUS_CASE,
     )
@@ -282,7 +297,7 @@ def main() -> None:
         "corpus_case": serialize_pretraining_corpus_case(PRETRAINING_CORPUS_CASE),
     }
 
-    if not validation_cache_path.exists():
+    if not validation_cache_path.exists() and is_global_zero_process():
         build_tokenized_cache(
             dataset=validation_source_dataset,
             path=validation_cache_path,
@@ -290,6 +305,9 @@ def main() -> None:
             max_len=args.max_len,
             metadata=validation_cache_metadata,
         )
+
+    if not is_global_zero_process():
+        wait_for_file(path=validation_cache_path)
 
     val_dataset = LocalTokenizedDataset(
         path=validation_cache_path,
@@ -388,10 +406,11 @@ def main() -> None:
     # Let Lightning place the model on CUDA or MPS when those
     # backends are available and choose precision for that backend.
     # ---------------------------------------------------------
+    strategy_kwargs = {"strategy": strategy} if strategy is not None else {}
     trainer = L.Trainer(
         max_steps=args.max_steps,
         accelerator=accelerator,
-        devices=1,
+        devices=devices,
         precision=precision,
         callbacks=callbacks,
         logger=metrics_logger,
@@ -401,6 +420,7 @@ def main() -> None:
         limit_val_batches=args.val_batches,
         num_sanity_val_steps=0,
         enable_progress_bar=False,
+        **strategy_kwargs,
     )
 
     # ---------------------------------------------------------
@@ -423,6 +443,9 @@ def main() -> None:
     # Save the trained weights and configuration so inference
     # can rebuild the same model with the same tokenizer ids.
     # ---------------------------------------------------------
+    if not trainer.is_global_zero:
+        return
+
     torch.save(model.state_dict(), model_dir / "model.pth")
 
     model_config = {
@@ -434,7 +457,11 @@ def main() -> None:
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "devices": args.devices,
+        "device_count": device_count,
+        "global_batch_size": args.batch_size * device_count,
         "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
+        "global_effective_batch_size": args.batch_size * args.gradient_accumulation_steps * device_count,
         "lr_schedule": "warmup_cosine",
         "lr_warmup_steps": args.lr_warmup_steps,
         "min_learning_rate": min_learning_rate,

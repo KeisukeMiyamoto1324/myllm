@@ -82,7 +82,7 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
 
         # ---------------------------------------------------------
         # Shuffle each training epoch with a distinct fixed seed,
-        # then shard the same order across DataLoader workers.
+        # then shard the same order across ranks and workers.
         # ---------------------------------------------------------
         if self.shuffle_buffer_size > 0:
             dataset = dataset.shuffle(
@@ -91,9 +91,20 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
             )
 
         worker_info = get_worker_info()
+        worker_count = 1 if worker_info is None else worker_info.num_workers
+        worker_index = 0 if worker_info is None else worker_info.id
+        rank_count = 1
+        rank_index = 0
 
-        if worker_info is not None:
-            dataset = dataset.shard(num_shards=worker_info.num_workers, index=worker_info.id)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank_count = torch.distributed.get_world_size()
+            rank_index = torch.distributed.get_rank()
+
+        shard_count = rank_count * worker_count
+        shard_index = rank_index * worker_count + worker_index
+
+        if shard_count > 1:
+            dataset = dataset.shard(num_shards=shard_count, index=shard_index)
 
         segment_buffer: list[PackedTrainingSegment] = []
         segment_index = 0

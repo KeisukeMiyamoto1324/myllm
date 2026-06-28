@@ -17,8 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.midtraining.training_corpus_cases import MIDTRAINING_CORPUS_CASE
 from src.midtraining.training_corpus_cases import serialize_midtraining_corpus_case
+from src.shared.device_utils import is_global_zero_process
 from src.shared.device_utils import resolve_accelerator
+from src.shared.device_utils import resolve_device_count
+from src.shared.device_utils import resolve_devices
 from src.shared.device_utils import resolve_precision
+from src.shared.device_utils import resolve_strategy
+from src.shared.device_utils import wait_for_file
 from src.shared.packed_dataset import build_tokenized_cache
 from src.shared.packed_dataset import LocalTokenizedDataset
 from src.shared.packed_dataset import PackedCorpusDataset
@@ -79,6 +84,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
     parser.add_argument("--loss-chunk-size", type=int, default=32)
+    parser.add_argument("--devices", type=str, default="auto")
     parser.add_argument("--output-path", type=str, default="models/lambda-160m-midtrained")
     parser.add_argument("--resume-from-checkpoint", type=str, default="")
     parser.add_argument("--push-to-hub", action="store_true")
@@ -106,6 +112,11 @@ def parse_args() -> argparse.Namespace:
 
     if args.gradient_accumulation_steps < 1:
         parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
+
+    try:
+        resolve_devices(devices=args.devices)
+    except ValueError as error:
+        parser.error(str(error))
 
     if args.max_steps <= 0:
         parser.error("--max-steps must be greater than 0")
@@ -149,6 +160,9 @@ def main() -> None:
     max_len = int(source_model_config["max_len"] if args.max_len is None else args.max_len)
     tokenizer = ByteLevelBPE.load(source_model_dir)
     accelerator = resolve_accelerator()
+    devices = resolve_devices(devices=args.devices)
+    device_count = resolve_device_count(accelerator=accelerator, devices=devices)
+    strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
@@ -162,7 +176,7 @@ def main() -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = model_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    validation_sample_count = args.batch_size * args.val_batches
+    validation_sample_count = args.batch_size * args.val_batches * device_count
     corpus_signature = build_corpus_signature()
     default_validation_cache_path = (
         model_dir
@@ -210,7 +224,7 @@ def main() -> None:
         "corpus_case": serialize_midtraining_corpus_case(MIDTRAINING_CORPUS_CASE),
     }
 
-    if not validation_cache_path.exists():
+    if not validation_cache_path.exists() and is_global_zero_process():
         build_tokenized_cache(
             dataset=validation_source_dataset,
             path=validation_cache_path,
@@ -218,6 +232,9 @@ def main() -> None:
             max_len=max_len,
             metadata=validation_cache_metadata,
         )
+
+    if not is_global_zero_process():
+        wait_for_file(path=validation_cache_path)
 
     val_dataset = LocalTokenizedDataset(
         path=validation_cache_path,
@@ -288,10 +305,11 @@ def main() -> None:
         version="",
         flush_logs_every_n_steps=args.metric_log_every_n_steps,
     )
+    strategy_kwargs = {"strategy": strategy} if strategy is not None else {}
     trainer = L.Trainer(
         max_steps=args.max_steps,
         accelerator=accelerator,
-        devices=1,
+        devices=devices,
         precision=precision,
         callbacks=callbacks,
         logger=metrics_logger,
@@ -301,6 +319,7 @@ def main() -> None:
         limit_val_batches=args.val_batches,
         num_sanity_val_steps=0,
         enable_progress_bar=False,
+        **strategy_kwargs,
     )
     checkpoint_path = args.resume_from_checkpoint or None
     trainer.fit(
@@ -314,6 +333,9 @@ def main() -> None:
     # Save final weights with inherited architecture metadata and
     # the exact fixed-LR, corpus, and step budget details.
     # ---------------------------------------------------------
+    if not trainer.is_global_zero:
+        return
+
     torch.save(model.state_dict(), model_dir / "model.pth")
     model_config = {
         **source_model_config,
@@ -321,7 +343,11 @@ def main() -> None:
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "devices": args.devices,
+        "device_count": device_count,
+        "global_batch_size": args.batch_size * device_count,
         "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
+        "global_effective_batch_size": args.batch_size * args.gradient_accumulation_steps * device_count,
         "lr_schedule": "fixed",
         "loss_chunk_size": args.loss_chunk_size,
         "pad_token_id": pad_token_id,

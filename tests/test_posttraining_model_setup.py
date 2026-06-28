@@ -88,6 +88,7 @@ class PosttrainingModelSetupTest(unittest.TestCase):
             args = parse_args()
 
         self.assertEqual(args.repeat_epochs, 3)
+        self.assertEqual(args.devices, "auto")
 
     def test_download_base_model_uses_hub_snapshot(self) -> None:
         # ---------------------------------------------------------
@@ -195,6 +196,11 @@ class PosttrainingModelSetupTest(unittest.TestCase):
                 base_model_id=DEFAULT_BASE_MODEL_ID,
                 repeat_epochs=3,
                 posttraining_steps=9,
+                devices="auto",
+                device_count=1,
+                global_batch_size=16,
+                global_effective_batch_size=16,
+                batch_size=16,
             )
             model_config = {
                 "max_len": 16,
@@ -229,6 +235,9 @@ class PosttrainingModelSetupTest(unittest.TestCase):
         self.assertEqual(payload["validation_dataset"], "msfm/ichikara-instruction-all:test")
         self.assertEqual(payload["repeat_epochs"], 3)
         self.assertEqual(payload["posttraining_steps"], 9)
+        self.assertEqual(payload["devices"], "auto")
+        self.assertEqual(payload["device_count"], 1)
+        self.assertEqual(payload["global_batch_size"], 16)
         self.assertTrue(model_path_exists)
 
     def test_ichikara_dataset_maps_text_and_output_to_chat_messages(self) -> None:
@@ -279,6 +288,26 @@ class PosttrainingModelSetupTest(unittest.TestCase):
             )
 
         self.assertEqual(max_steps, 9)
+
+    def test_build_dataloaders_computes_multi_gpu_epoch_steps(self) -> None:
+        # ---------------------------------------------------------
+        # Keep repeat_epochs tied to full dataset passes when each
+        # optimizer step consumes batches from multiple GPUs.
+        # ---------------------------------------------------------
+        fake_datasets = [FakeDataset(size=5), FakeDataset(size=2)]
+
+        with patch("src.posttraining.dataloaders.IchikaraInstructionDataset", side_effect=fake_datasets):
+            _, _, max_steps = build_dataloaders(
+                tokenizer=FakeTokenizer(),
+                max_len=8,
+                batch_size=2,
+                num_workers=0,
+                accelerator="cpu",
+                repeat_epochs=3,
+                device_count=2,
+            )
+
+        self.assertEqual(max_steps, 6)
 
     def test_build_trainer_validates_by_global_step(self) -> None:
         # ---------------------------------------------------------

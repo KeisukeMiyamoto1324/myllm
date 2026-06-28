@@ -178,6 +178,47 @@ class PretrainingDatasetTest(unittest.TestCase):
         input_token_ids = [example[0][1].item() for example in examples]
         self.assertEqual(sorted(input_token_ids), [20, 40])
 
+    def test_pretraining_corpus_shards_streaming_dataset_by_rank_and_worker(self) -> None:
+        # ---------------------------------------------------------
+        # Combine DDP rank and DataLoader worker ids so every
+        # process reads a distinct streaming shard.
+        # ---------------------------------------------------------
+        corpus_case = build_case(name="custom")
+        dataset = PretrainingCorpusDataset(
+            corpus_case=corpus_case,
+            tokenizer=FixedTokenizer(),
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        fake_dataset = FakeStreamingDataset(
+            samples=[
+                {"text": "10"},
+                {"text": "20"},
+                {"text": "30"},
+                {"text": "40"},
+                {"text": "50"},
+                {"text": "60"},
+                {"text": "70"},
+                {"text": "80"},
+            ]
+        )
+        worker_info = type("WorkerInfo", (), {"num_workers": 2, "id": 1})()
+
+        with (
+            patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset),
+            patch("src.shared.packed_dataset.get_worker_info", return_value=worker_info),
+            patch("torch.distributed.is_available", return_value=True),
+            patch("torch.distributed.is_initialized", return_value=True),
+            patch("torch.distributed.get_world_size", return_value=2),
+            patch("torch.distributed.get_rank", return_value=1),
+        ):
+            examples = list(iter(dataset))
+
+        input_token_ids = [example[0][1].item() for example in examples]
+        self.assertEqual(sorted(input_token_ids), [40, 80])
+
     def test_pretraining_corpus_keeps_wikipedia_urls(self) -> None:
         # ---------------------------------------------------------
         # Keep Wikipedia documents because the single FineWeb corpus

@@ -1,3 +1,5 @@
+import math
+
 from torch.utils.data import DataLoader
 
 from src.posttraining.dataset import ICHIKARA_TRAIN_SPLIT
@@ -13,6 +15,7 @@ def build_dataloaders(
     num_workers: int,
     accelerator: str,
     repeat_epochs: int,
+    device_count: int = 1,
 ) -> tuple[DataLoader, DataLoader, int]:
     # ---------------------------------------------------------
     # Resolve tokenizer ids shared by both SFT datasets and the
@@ -67,5 +70,5 @@ def build_dataloaders(
         pin_memory=use_pin_memory,
         persistent_workers=use_persistent_workers,
     )
-    max_steps = len(train_dataloader) * repeat_epochs
+    max_steps = math.ceil(len(train_dataset) / (batch_size * device_count)) * repeat_epochs
     return train_dataloader, validation_dataloader, max_steps

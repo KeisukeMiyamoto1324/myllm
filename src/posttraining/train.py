@@ -19,7 +19,10 @@ from src.posttraining.model_setup import download_base_model
 from src.posttraining.model_setup import load_base_model
 from src.posttraining.trainer import train_stage
 from src.shared.device_utils import resolve_accelerator
+from src.shared.device_utils import resolve_device_count
+from src.shared.device_utils import resolve_devices
 from src.shared.device_utils import resolve_precision
+from src.shared.device_utils import resolve_strategy
 load_dotenv()
 
 
@@ -40,7 +43,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-check-interval", type=int, default=500)
     parser.add_argument("--checkpoint-every-n-steps", type=int, default=1000)
     parser.add_argument("--metric-log-every-n-steps", type=int, default=50)
-    return parser.parse_args()
+    parser.add_argument("--devices", type=str, default="auto")
+    args = parser.parse_args()
+
+    try:
+        resolve_devices(devices=args.devices)
+    except ValueError as error:
+        parser.error(str(error))
+
+    return args
 
 
 def main() -> None:
@@ -53,6 +64,9 @@ def main() -> None:
     model_dir = Path(args.output_path)
     model_dir.mkdir(parents=True, exist_ok=True)
     accelerator = resolve_accelerator()
+    devices = resolve_devices(devices=args.devices)
+    device_count = resolve_device_count(accelerator=accelerator, devices=devices)
+    strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
 
     # ---------------------------------------------------------
@@ -75,14 +89,18 @@ def main() -> None:
         num_workers=args.num_workers,
         accelerator=accelerator,
         repeat_epochs=args.repeat_epochs,
+        device_count=device_count,
     )
     args.posttraining_steps = max_steps
+    args.device_count = device_count
+    args.global_batch_size = args.batch_size * device_count
+    args.global_effective_batch_size = args.batch_size * device_count
 
     # ---------------------------------------------------------
     # Run Ichikara instruction tuning for the requested number of
     # passes through the train split.
     # ---------------------------------------------------------
-    train_stage(
+    trainer = train_stage(
         model=model,
         model_dir=model_dir,
         stage_name="ichikara",
@@ -90,6 +108,8 @@ def main() -> None:
         train_dataloader=train_dataloader,
         validation_dataloader=validation_dataloader,
         accelerator=accelerator,
+        devices=devices,
+        strategy=strategy,
         precision=precision,
         args=args,
     )
@@ -97,6 +117,9 @@ def main() -> None:
     # ---------------------------------------------------------
     # Save the final model after Ichikara tuning completes.
     # ---------------------------------------------------------
+    if not trainer.is_global_zero:
+        return
+
     save_chat_model(
         model=model,
         model_dir=model_dir,
