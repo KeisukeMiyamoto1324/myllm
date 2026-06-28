@@ -322,7 +322,7 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=accelerator == "cuda",
-        persistent_workers=args.num_workers > 0,
+        persistent_workers=False,
     )
     val_dataloader = DataLoader(
         val_dataset,
