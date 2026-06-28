@@ -62,6 +62,43 @@ class MidtrainingTest(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     parse_args()
 
+    def test_parse_args_rejects_invalid_lr_schedule(self) -> None:
+        # ---------------------------------------------------------
+        # Reject schedule values that cannot form a bounded warmup
+        # and cosine decay interval for continued training.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir)
+
+            for file_name in ["model.pth", "model_config.json", "tokenizer.json"]:
+                (model_dir / file_name).touch()
+
+            argv = [
+                "train.py",
+                "--model-path",
+                str(model_dir),
+                "--max-steps",
+                "2000",
+                "--lr-warmup-steps",
+                "2000",
+            ]
+
+            with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parse_args()
+
+            argv = [
+                "train.py",
+                "--model-path",
+                str(model_dir),
+                "--min-learning-rate-ratio",
+                "1.1",
+            ]
+
+            with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parse_args()
+
 
 if __name__ == "__main__":
     unittest.main()

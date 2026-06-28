@@ -41,6 +41,9 @@ def build_model_from_config(
     learning_rate: float | None = None,
     use_fused_optimizer: bool = False,
     max_len: int | None = None,
+    lr_warmup_steps: int | None = None,
+    lr_total_steps: int | None = None,
+    min_learning_rate: float | None = None,
 ) -> DecoderOnlyTransformer:
     # ---------------------------------------------------------
     # Recreate the local Transformer from saved architecture
@@ -56,6 +59,9 @@ def build_model_from_config(
         learning_rate=float(model_config["learning_rate"] if learning_rate is None else learning_rate),
         pad_token_id=int(model_config["pad_token_id"]),
         use_fused_optimizer=use_fused_optimizer,
+        lr_warmup_steps=lr_warmup_steps,
+        lr_total_steps=lr_total_steps,
+        min_learning_rate=min_learning_rate,
     )
 
 
@@ -66,6 +72,9 @@ def load_pytorch_model(
     use_fused_optimizer: bool = False,
     map_location: str | torch.device = "cpu",
     max_len: int | None = None,
+    lr_warmup_steps: int | None = None,
+    lr_total_steps: int | None = None,
+    min_learning_rate: float | None = None,
 ) -> tuple[DecoderOnlyTransformer, ModelConfig]:
     # ---------------------------------------------------------
     # Load PyTorch weights directly from model.pth and return both
@@ -78,6 +87,9 @@ def load_pytorch_model(
         learning_rate=learning_rate,
         use_fused_optimizer=use_fused_optimizer,
         max_len=max_len,
+        lr_warmup_steps=lr_warmup_steps,
+        lr_total_steps=lr_total_steps,
+        min_learning_rate=min_learning_rate,
     )
     model_state = torch.load(
         model_dir / "model.pth",

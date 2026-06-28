@@ -107,6 +107,40 @@ class PretrainingPytorchArtifactsTest(unittest.TestCase):
         self.assertEqual(loaded_model.max_len, 32)
         self.assertTrue(torch.equal(model.we.weight, loaded_model.we.weight))
 
+    def test_load_pytorch_model_applies_requested_lr_schedule(self) -> None:
+        # ---------------------------------------------------------
+        # Keep scheduler values caller-controlled so mid-training can
+        # add warmup cosine decay without changing saved architecture.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir)
+            model = DecoderOnlyTransformer(
+                num_tokens=12,
+                d_model=8,
+                max_len=16,
+                num_layers=2,
+                num_heads=2,
+                d_ff=16,
+                pad_token_id=0,
+            )
+            torch.save(model.state_dict(), output_path / "model.pth")
+            (output_path / "model_config.json").write_text(
+                json.dumps(build_model_config()),
+                encoding="utf-8",
+            )
+
+            loaded_model, _ = load_pytorch_model(
+                model_dir=output_path,
+                vocab_size=12,
+                lr_warmup_steps=2,
+                lr_total_steps=10,
+                min_learning_rate=0.01,
+            )
+
+        self.assertEqual(loaded_model.lr_warmup_steps, 2)
+        self.assertEqual(loaded_model.lr_total_steps, 10)
+        self.assertEqual(loaded_model.min_learning_rate, 0.01)
+
     def test_push_uses_hub_model_repo_and_only_allows_artifacts(self) -> None:
         # ---------------------------------------------------------
         # Mock the Hub client so publishing behavior is verified
