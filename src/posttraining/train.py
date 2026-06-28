@@ -11,13 +11,13 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.posttraining.artifacts import save_chat_model
-from src.posttraining.cli import validate_repeat_epochs
 from src.posttraining.dataloaders import build_dataloaders
 from src.posttraining.model_setup import build_tokenizer
 from src.posttraining.model_setup import DEFAULT_BASE_MODEL_ID
 from src.posttraining.model_setup import download_base_model
 from src.posttraining.model_setup import load_base_model
 from src.posttraining.trainer import train_stage
+from src.shared.cli import require
 from src.shared.device_utils import resolve_accelerator
 from src.shared.device_utils import resolve_device_count
 from src.shared.device_utils import resolve_devices
@@ -46,10 +46,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--devices", type=str, default="auto")
     args = parser.parse_args()
 
+    require(args.repeat_epochs > 0, parser, "--repeat-epochs must be greater than 0")
+
     try:
         resolve_devices(devices=args.devices)
     except ValueError as error:
-        parser.error(str(error))
+        require(False, parser, str(error))
 
     return args
 
@@ -60,7 +62,6 @@ def main() -> None:
     # active accelerator configuration.
     # ---------------------------------------------------------
     args = parse_args()
-    validate_repeat_epochs(args=args)
     model_dir = Path(args.output_path)
     model_dir.mkdir(parents=True, exist_ok=True)
     accelerator = resolve_accelerator()

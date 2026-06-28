@@ -21,6 +21,7 @@ from src.shared.packed_dataset import PACKING_VERSION
 from src.shared.packed_dataset import PackedCorpusDataset
 from src.shared.packed_dataset import SHUFFLE_BUFFER_SIZE
 from src.shared.packed_dataset import SHUFFLE_SEED
+from src.shared.cli import require
 from src.shared.device_utils import is_global_zero_process
 from src.shared.device_utils import resolve_accelerator
 from src.shared.device_utils import resolve_device_count
@@ -177,38 +178,54 @@ def parse_args() -> argparse.Namespace:
     # Reject invalid LR schedule settings before any model or
     # streaming dataset state is initialized.
     # ---------------------------------------------------------
-    if args.lr_warmup_steps < 0 or args.lr_warmup_steps >= args.max_steps:
-        parser.error("--lr-warmup-steps must be greater than or equal to 0 and less than --max-steps")
-
-    if args.min_learning_rate_ratio < 0.0 or args.min_learning_rate_ratio > 1.0:
-        parser.error("--min-learning-rate-ratio must be between 0.0 and 1.0")
-
-    if args.gradient_accumulation_steps < 1:
-        parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
-
-    if args.max_len <= 0:
-        parser.error("--max-len must be greater than 0")
-
-    if args.loss_chunk_size <= 0:
-        parser.error("--loss-chunk-size must be greater than 0")
+    require(
+        args.lr_warmup_steps >= 0 and args.lr_warmup_steps < args.max_steps,
+        parser,
+        "--lr-warmup-steps must be greater than or equal to 0 and less than --max-steps",
+    )
+    require(
+        0.0 <= args.min_learning_rate_ratio <= 1.0,
+        parser,
+        "--min-learning-rate-ratio must be between 0.0 and 1.0",
+    )
+    require(
+        args.gradient_accumulation_steps >= 1,
+        parser,
+        "--gradient-accumulation-steps must be greater than or equal to 1",
+    )
+    require(args.max_len > 0, parser, "--max-len must be greater than 0")
+    require(args.loss_chunk_size > 0, parser, "--loss-chunk-size must be greater than 0")
+    require(args.val_split_modulo > 1, parser, "--val-split-modulo must be greater than 1")
+    require(
+        0 <= args.val_split_index < args.val_split_modulo,
+        parser,
+        "--val-split-index must be within --val-split-modulo",
+    )
 
     try:
         resolve_devices(devices=args.devices)
     except ValueError as error:
-        parser.error(str(error))
+        require(False, parser, str(error))
 
     # ---------------------------------------------------------
     # Reject missing resume inputs before streaming datasets or
     # model artifacts are opened for the training run.
     # ---------------------------------------------------------
-    if args.resume_from_checkpoint and not Path(args.resume_from_checkpoint).is_file():
-        parser.error("--resume-from-checkpoint must point to an existing checkpoint file")
-
-    if args.continue_from_model and not Path(args.continue_from_model).is_file():
-        parser.error("--continue-from-model must point to an existing model state file")
-
-    if args.push_to_hub and not os.environ.get("HF_REPO"):
-        parser.error("HF_REPO is required in the environment when --push-to-hub is set")
+    require(
+        not args.resume_from_checkpoint or Path(args.resume_from_checkpoint).is_file(),
+        parser,
+        "--resume-from-checkpoint must point to an existing checkpoint file",
+    )
+    require(
+        not args.continue_from_model or Path(args.continue_from_model).is_file(),
+        parser,
+        "--continue-from-model must point to an existing model state file",
+    )
+    require(
+        not args.push_to_hub or bool(os.environ.get("HF_REPO")),
+        parser,
+        "HF_REPO is required in the environment when --push-to-hub is set",
+    )
 
     return args
 

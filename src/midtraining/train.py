@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.midtraining.training_corpus_cases import MIDTRAINING_CORPUS_CASE
 from src.midtraining.training_corpus_cases import serialize_midtraining_corpus_case
+from src.shared.cli import require
 from src.shared.device_utils import is_global_zero_process
 from src.shared.device_utils import resolve_accelerator
 from src.shared.device_utils import resolve_device_count
@@ -80,40 +81,46 @@ def parse_args() -> argparse.Namespace:
         model_path / "tokenizer.json",
     ]
 
-    if not model_path.is_dir() or any(not path.is_file() for path in required_model_files):
-        parser.error("--model-path must contain model.pth, model_config.json, and tokenizer.json")
-
-    if args.max_len is not None and args.max_len <= 0:
-        parser.error("--max-len must be greater than 0")
-
-    if args.learning_rate <= 0.0:
-        parser.error("--learning-rate must be greater than 0")
-
-    if args.gradient_accumulation_steps < 1:
-        parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
+    require(
+        model_path.is_dir() and all(path.is_file() for path in required_model_files),
+        parser,
+        "--model-path must contain model.pth, model_config.json, and tokenizer.json",
+    )
+    require(args.max_len is None or args.max_len > 0, parser, "--max-len must be greater than 0")
+    require(args.learning_rate > 0.0, parser, "--learning-rate must be greater than 0")
+    require(
+        args.gradient_accumulation_steps >= 1,
+        parser,
+        "--gradient-accumulation-steps must be greater than or equal to 1",
+    )
 
     try:
         resolve_devices(devices=args.devices)
     except ValueError as error:
-        parser.error(str(error))
+        require(False, parser, str(error))
 
-    if args.max_steps <= 0:
-        parser.error("--max-steps must be greater than 0")
-
-    if args.checkpoint_every_n_steps <= 0:
-        parser.error("--checkpoint-every-n-steps must be greater than 0")
-
-    if args.val_split_modulo <= 1:
-        parser.error("--val-split-modulo must be greater than 1")
-
-    if args.val_split_index < 0 or args.val_split_index >= args.val_split_modulo:
-        parser.error("--val-split-index must be within --val-split-modulo")
-
-    if args.resume_from_checkpoint and not Path(args.resume_from_checkpoint).is_file():
-        parser.error("--resume-from-checkpoint must point to an existing checkpoint file")
-
-    if args.push_to_hub and not os.environ.get("HF_REPO"):
-        parser.error("HF_REPO is required in the environment when --push-to-hub is set")
+    require(args.max_steps > 0, parser, "--max-steps must be greater than 0")
+    require(
+        args.checkpoint_every_n_steps > 0,
+        parser,
+        "--checkpoint-every-n-steps must be greater than 0",
+    )
+    require(args.val_split_modulo > 1, parser, "--val-split-modulo must be greater than 1")
+    require(
+        0 <= args.val_split_index < args.val_split_modulo,
+        parser,
+        "--val-split-index must be within --val-split-modulo",
+    )
+    require(
+        not args.resume_from_checkpoint or Path(args.resume_from_checkpoint).is_file(),
+        parser,
+        "--resume-from-checkpoint must point to an existing checkpoint file",
+    )
+    require(
+        not args.push_to_hub or bool(os.environ.get("HF_REPO")),
+        parser,
+        "HF_REPO is required in the environment when --push-to-hub is set",
+    )
 
     return args
 

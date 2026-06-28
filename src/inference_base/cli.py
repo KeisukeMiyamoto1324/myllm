@@ -1,44 +1,7 @@
 import argparse
 from pathlib import Path
 
-
-def positive_float(value: str) -> float:
-    # ---------------------------------------------------------
-    # Convert CLI input into a positive float used by generation
-    # settings such as temperature and repetition penalty.
-    # ---------------------------------------------------------
-    parsed_value = float(value)
-
-    if parsed_value <= 0.0:
-        raise argparse.ArgumentTypeError("value must be greater than 0")
-
-    return parsed_value
-
-
-def probability_float(value: str) -> float:
-    # ---------------------------------------------------------
-    # Convert CLI input into a probability used by nucleus
-    # sampling and reject values outside the valid range.
-    # ---------------------------------------------------------
-    parsed_value = float(value)
-
-    if parsed_value <= 0.0 or parsed_value > 1.0:
-        raise argparse.ArgumentTypeError("value must be greater than 0 and less than or equal to 1")
-
-    return parsed_value
-
-
-def non_negative_int(value: str) -> int:
-    # ---------------------------------------------------------
-    # Convert CLI input into a non-negative integer used by top-k
-    # sampling, where 0 disables the top-k filter.
-    # ---------------------------------------------------------
-    parsed_value = int(value)
-
-    if parsed_value < 0:
-        raise argparse.ArgumentTypeError("value must be greater than or equal to 0")
-
-    return parsed_value
+from src.shared.cli import require
 
 
 def parse_args(default_model_dir: Path) -> argparse.Namespace:
@@ -51,14 +14,30 @@ def parse_args(default_model_dir: Path) -> argparse.Namespace:
     parser.add_argument("--prompt", "--promot", type=str, default="")
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--do-sample", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--temperature", type=positive_float, default=1)
-    parser.add_argument("--top-p", type=probability_float, default=0.85)
-    parser.add_argument("--top-k", type=non_negative_int, default=8)
-    parser.add_argument("--repetition-penalty", type=positive_float, default=1.2)
-    parser.add_argument("--no-repeat-ngram-size", type=non_negative_int, default=3)
+    parser.add_argument("--temperature", type=float, default=1)
+    parser.add_argument("--top-p", type=float, default=0.85)
+    parser.add_argument("--top-k", type=int, default=8)
+    parser.add_argument("--repetition-penalty", type=float, default=1.2)
+    parser.add_argument("--no-repeat-ngram-size", type=int, default=3)
     parser.add_argument(
         "--torch-dtype",
         choices=["auto", "float16", "bfloat16", "float32"],
         default="auto",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    require(args.temperature > 0.0, parser, "--temperature must be greater than 0")
+    require(
+        args.top_p > 0.0 and args.top_p <= 1.0,
+        parser,
+        "--top-p must be greater than 0 and less than or equal to 1",
+    )
+    require(args.top_k >= 0, parser, "--top-k must be greater than or equal to 0")
+    require(args.repetition_penalty > 0.0, parser, "--repetition-penalty must be greater than 0")
+    require(
+        args.no_repeat_ngram_size >= 0,
+        parser,
+        "--no-repeat-ngram-size must be greater than or equal to 0",
+    )
+
+    return args
