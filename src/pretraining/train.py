@@ -186,6 +186,12 @@ def parse_args() -> argparse.Namespace:
     if args.gradient_accumulation_steps < 1:
         parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
 
+    if args.max_len <= 0:
+        parser.error("--max-len must be greater than 0")
+
+    if args.loss_chunk_size <= 0:
+        parser.error("--loss-chunk-size must be greater than 0")
+
     try:
         resolve_devices(devices=args.devices)
     except ValueError as error:
