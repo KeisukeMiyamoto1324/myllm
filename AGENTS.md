@@ -17,4 +17,4 @@
 
 ## Other
 - You can freely install libraries using pip3.
-- Please respond in language same as given user prompt.
+- Always respond in Japanese.
