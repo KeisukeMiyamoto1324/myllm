@@ -6,7 +6,6 @@ from pathlib import Path
 import sys
 
 import lightning as L
-from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
@@ -25,8 +24,12 @@ from src.shared.device_utils import resolve_precision
 from src.shared.device_utils import resolve_strategy
 from src.shared.device_utils import wait_for_file
 from src.shared.packed_dataset import build_tokenized_cache
+from src.shared.packed_dataset import DatasetEpochCallback
 from src.shared.packed_dataset import LocalTokenizedDataset
+from src.shared.packed_dataset import PACKING_VERSION
 from src.shared.packed_dataset import PackedCorpusDataset
+from src.shared.packed_dataset import SHUFFLE_BUFFER_SIZE
+from src.shared.packed_dataset import SHUFFLE_SEED
 from src.shared.pytorch_artifacts import load_model_config
 from src.shared.pytorch_artifacts import load_pytorch_model
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
@@ -38,30 +41,6 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-
-
-PACKING_VERSION = "bucket-packing-v1"
-SHUFFLE_BUFFER_SIZE = 10000
-SHUFFLE_SEED = 17
-
-
-class DatasetEpochCallback(Callback):
-    def __init__(self, dataset: PackedCorpusDataset) -> None:
-        super().__init__()
-        self.dataset = dataset
-
-    def on_train_epoch_start(
-        self,
-        trainer: L.Trainer,
-        pl_module: L.LightningModule,
-    ) -> None:
-        # ---------------------------------------------------------
-        # Use the Lightning epoch index to select the deterministic
-        # shuffle order, including after checkpoint resume.
-        # ---------------------------------------------------------
-        del pl_module
-        self.dataset.set_epoch(epoch_index=trainer.current_epoch)
-
 
 def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------

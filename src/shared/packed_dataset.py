@@ -4,6 +4,8 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
+import lightning as L
+from lightning.pytorch.callbacks import Callback
 from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
@@ -15,8 +17,29 @@ from src.shared.console import progress_manager
 
 PackedTrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 PackedTrainingSegment = tuple[list[int], list[int], int]
+PACKING_VERSION = "bucket-packing-v1"
+SHUFFLE_BUFFER_SIZE = 10000
+SHUFFLE_SEED = 17
 BUCKET_PACKING_BUFFER_SEGMENTS = 4096
 BUCKET_PACKING_SEED = 17
+
+
+class DatasetEpochCallback(Callback):
+    def __init__(self, dataset: "PackedCorpusDataset") -> None:
+        super().__init__()
+        self.dataset = dataset
+
+    def on_train_epoch_start(
+        self,
+        trainer: L.Trainer,
+        pl_module: L.LightningModule,
+    ) -> None:
+        # ---------------------------------------------------------
+        # Use the Lightning epoch index to select the deterministic
+        # shuffle order, including after checkpoint resume.
+        # ---------------------------------------------------------
+        del pl_module
+        self.dataset.set_epoch(epoch_index=trainer.current_epoch)
 
 
 class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):

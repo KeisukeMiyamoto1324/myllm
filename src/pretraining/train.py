@@ -15,8 +15,12 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.shared.packed_dataset import build_tokenized_cache
+from src.shared.packed_dataset import DatasetEpochCallback
 from src.shared.packed_dataset import LocalTokenizedDataset
+from src.shared.packed_dataset import PACKING_VERSION
 from src.shared.packed_dataset import PackedCorpusDataset
+from src.shared.packed_dataset import SHUFFLE_BUFFER_SIZE
+from src.shared.packed_dataset import SHUFFLE_SEED
 from src.shared.device_utils import is_global_zero_process
 from src.shared.device_utils import resolve_accelerator
 from src.shared.device_utils import resolve_device_count
@@ -35,10 +39,6 @@ from src.shared.model.transformer import DecoderOnlyTransformer
 
 from dotenv import load_dotenv
 load_dotenv()
-
-
-PACKING_VERSION = "bucket-packing-v1"
-
 
 def parse_args() -> argparse.Namespace:
     # ---------------------------------------------------------
@@ -275,6 +275,8 @@ def main() -> None:
         eos_token_id=eos_token_id,
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
+        shuffle_buffer_size=SHUFFLE_BUFFER_SIZE,
+        shuffle_seed=SHUFFLE_SEED,
     )
     validation_source_dataset = PackedCorpusDataset(
         corpus_case=PRETRAINING_CORPUS_CASE,
@@ -373,6 +375,7 @@ def main() -> None:
             tokenizer=tokenizer,
             output_dir=model_dir / "validation-generations",
         ),
+        DatasetEpochCallback(dataset=train_dataset),
         ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename="step-{step}",
@@ -477,6 +480,8 @@ def main() -> None:
         "validation_cache_path": str(validation_cache_path),
         "validation_sample_count": validation_sample_count,
         "packing_version": PACKING_VERSION,
+        "shuffle_buffer_size": SHUFFLE_BUFFER_SIZE,
+        "shuffle_seed": SHUFFLE_SEED,
         "trained_steps": trainer.global_step,
     }
 
