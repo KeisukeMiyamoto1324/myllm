@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.pretraining.cli import parse_args
 from src.shared.packed_dataset import build_tokenized_cache
+from src.shared.packed_dataset import collate_packed_examples
 from src.shared.packed_dataset import LocalTokenizedDataset
 from src.shared.packed_dataset import PACKING_VERSION
 from src.shared.packed_dataset import PackedCorpusDataset
@@ -64,6 +65,9 @@ def main() -> None:
     device_count = resolve_device_count(accelerator=accelerator, devices=devices)
     strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
+
+    if accelerator != "cuda":
+        raise RuntimeError("FlashAttention-2 varlen training requires CUDA")
 
     # ---------------------------------------------------------
     # Create the output directory and resolve the tokenizer ids
@@ -157,6 +161,7 @@ def main() -> None:
         num_workers=args.num_workers,
         pin_memory=accelerator == "cuda",
         persistent_workers=args.num_workers > 0,
+        collate_fn=collate_packed_examples,
     )
     val_dataloader = DataLoader(
         val_dataset,
@@ -164,6 +169,7 @@ def main() -> None:
         num_workers=args.num_workers,
         pin_memory=accelerator == "cuda",
         persistent_workers=args.num_workers > 0,
+        collate_fn=collate_packed_examples,
     )
 
     if is_global_zero_process():
@@ -303,6 +309,8 @@ def main() -> None:
         "num_heads": args.num_heads,
         "d_ff": args.d_ff,
         "ffn_type": "swiglu",
+        "attention_backend": "flash_attention_2_varlen",
+        "requires_cuda": True,
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,

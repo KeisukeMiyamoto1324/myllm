@@ -24,6 +24,7 @@ from src.shared.device_utils import resolve_precision
 from src.shared.device_utils import resolve_strategy
 from src.shared.device_utils import wait_for_file
 from src.shared.packed_dataset import build_tokenized_cache
+from src.shared.packed_dataset import collate_packed_examples
 from src.shared.packed_dataset import LocalTokenizedDataset
 from src.shared.packed_dataset import PACKING_VERSION
 from src.shared.packed_dataset import PackedCorpusDataset
@@ -67,6 +68,9 @@ def main() -> None:
     device_count = resolve_device_count(accelerator=accelerator, devices=devices)
     strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
+
+    if accelerator != "cuda":
+        raise RuntimeError("FlashAttention-2 varlen training requires CUDA")
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
@@ -153,6 +157,7 @@ def main() -> None:
         num_workers=args.num_workers,
         pin_memory=accelerator == "cuda",
         persistent_workers=args.num_workers > 0,
+        collate_fn=collate_packed_examples,
     )
     val_dataloader = DataLoader(
         val_dataset,
@@ -160,6 +165,7 @@ def main() -> None:
         num_workers=args.num_workers,
         pin_memory=accelerator == "cuda",
         persistent_workers=args.num_workers > 0,
+        collate_fn=collate_packed_examples,
     )
 
     if is_global_zero_process():
@@ -268,6 +274,8 @@ def main() -> None:
         "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
         "global_effective_batch_size": args.batch_size * args.gradient_accumulation_steps * device_count,
         "ffn_type": "swiglu",
+        "attention_backend": "flash_attention_2_varlen",
+        "requires_cuda": True,
         "lr_schedule": "warmup_cosine",
         "lr_warmup_steps": args.lr_warmup_steps,
         "min_learning_rate": min_learning_rate,

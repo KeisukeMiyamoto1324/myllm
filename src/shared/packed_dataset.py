@@ -13,9 +13,9 @@ from src.shared.training_corpus import TrainingCorpusCase
 from src.shared.console import progress_manager
 
 
-PackedTrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+PackedTrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]
 PackedTrainingSegment = tuple[list[int], list[int], int]
-PACKING_VERSION = "bucket-packing-v1"
+PACKING_VERSION = "bucket-packing-flash-varlen-v1"
 SHUFFLE_BUFFER_SIZE = 10000
 SHUFFLE_SEED = 17
 BUCKET_PACKING_BUFFER_SEGMENTS = 4096
@@ -278,21 +278,21 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
         input_token_ids: list[int] = []
         label_token_ids: list[int] = []
         position_ids: list[int] = []
-        segment_ids: list[int] = []
+        document_lengths: list[int] = []
 
-        for segment_id, segment in enumerate(segments):
+        for segment in segments:
             segment_input_ids, segment_label_ids, _ = segment
             segment_len = len(segment_input_ids)
             input_token_ids.extend(segment_input_ids)
             label_token_ids.extend(segment_label_ids)
             position_ids.extend(range(segment_len))
-            segment_ids.extend([segment_id for _ in range(segment_len)])
+            document_lengths.append(segment_len)
 
         return self._build_example(
             input_token_ids=input_token_ids,
             label_token_ids=label_token_ids,
             position_ids=position_ids,
-            segment_ids=segment_ids,
+            document_lengths=document_lengths,
         )
 
     def _build_example(
@@ -300,22 +300,19 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
         input_token_ids: list[int],
         label_token_ids: list[int],
         position_ids: list[int],
-        segment_ids: list[int],
+        document_lengths: list[int],
     ) -> PackedTrainingExample:
         # ---------------------------------------------------------
-        # Pad all packed streams so every sample matches the fixed
-        # context length expected by the model and DataLoader.
+        # Return compact packed streams and document offsets so
+        # FlashAttention varlen can avoid dense attention masks.
         # ---------------------------------------------------------
-        padding_size = self.max_len - len(input_token_ids)
-        padded_input_ids = input_token_ids + [self.pad_token_id for _ in range(padding_size)]
-        padded_label_ids = label_token_ids + [self.pad_token_id for _ in range(padding_size)]
-        padded_position_ids = position_ids + [0 for _ in range(padding_size)]
-        padded_segment_ids = segment_ids + [-1 for _ in range(padding_size)]
-        inputs = torch.tensor(padded_input_ids, dtype=torch.long)
-        labels = torch.tensor(padded_label_ids, dtype=torch.long)
-        positions = torch.tensor(padded_position_ids, dtype=torch.long)
-        segments = torch.tensor(padded_segment_ids, dtype=torch.long)
-        return inputs, labels, positions, segments
+        cumulative_lengths = torch.tensor(document_lengths, dtype=torch.int32).cumsum(dim=0)
+        cu_seqlens = torch.tensor([0, *cumulative_lengths.tolist()], dtype=torch.int32)
+        inputs = torch.tensor(input_token_ids, dtype=torch.long)
+        labels = torch.tensor(label_token_ids, dtype=torch.long)
+        positions = torch.tensor(position_ids, dtype=torch.long)
+        max_seqlen = max(document_lengths)
+        return inputs, labels, positions, cu_seqlens, max_seqlen
 
 
 class LocalTokenizedDataset(Dataset[PackedTrainingExample]):
@@ -336,7 +333,8 @@ class LocalTokenizedDataset(Dataset[PackedTrainingExample]):
         self.inputs = payload["inputs"]
         self.labels = payload["labels"]
         self.position_ids = payload["position_ids"]
-        self.segment_ids = payload["segment_ids"]
+        self.cu_seqlens = payload["cu_seqlens"]
+        self.max_seqlens = payload["max_seqlens"]
         self.metadata = payload["metadata"]
 
         # ---------------------------------------------------------
@@ -372,8 +370,34 @@ class LocalTokenizedDataset(Dataset[PackedTrainingExample]):
             self.inputs[index],
             self.labels[index],
             self.position_ids[index],
-            self.segment_ids[index],
+            self.cu_seqlens[index],
+            int(self.max_seqlens[index]),
         )
+
+
+def collate_packed_examples(
+    examples: list[PackedTrainingExample],
+) -> PackedTrainingExample:
+    # ---------------------------------------------------------
+    # Flatten variable-length packed samples into one global token
+    # stream and rebuild document offsets for FlashAttention.
+    # ---------------------------------------------------------
+    input_ids = torch.cat([example[0] for example in examples])
+    label_ids = torch.cat([example[1] for example in examples])
+    position_ids = torch.cat([example[2] for example in examples])
+    cu_seqlens_values = [0]
+    total_tokens = 0
+
+    for _, _, _, sample_cu_seqlens, _ in examples:
+        document_lengths = sample_cu_seqlens.diff().tolist()
+
+        for document_length in document_lengths:
+            total_tokens += int(document_length)
+            cu_seqlens_values.append(total_tokens)
+
+    cu_seqlens = torch.tensor(cu_seqlens_values, dtype=torch.int32)
+    max_seqlen = max(example[4] for example in examples)
+    return input_ids, label_ids, position_ids, cu_seqlens, max_seqlen
 
 
 def build_tokenized_cache(
@@ -391,7 +415,8 @@ def build_tokenized_cache(
     inputs: list[torch.Tensor] = []
     labels: list[torch.Tensor] = []
     position_ids: list[torch.Tensor] = []
-    segment_ids: list[torch.Tensor] = []
+    cu_seqlens: list[torch.Tensor] = []
+    max_seqlens: list[int] = []
 
     # ---------------------------------------------------------
     # Consume exactly the configured validation budget and stop
@@ -403,11 +428,12 @@ def build_tokenized_cache(
     )
 
     try:
-        for input_ids, label_ids, example_position_ids, example_segment_ids in dataset:
+        for input_ids, label_ids, example_position_ids, example_cu_seqlens, example_max_seqlen in dataset:
             inputs.append(input_ids)
             labels.append(label_ids)
             position_ids.append(example_position_ids)
-            segment_ids.append(example_segment_ids)
+            cu_seqlens.append(example_cu_seqlens)
+            max_seqlens.append(example_max_seqlen)
             progress_manager.update(task_id=task_id, advance=1)
 
             if len(inputs) == num_samples:
@@ -427,10 +453,11 @@ def build_tokenized_cache(
     # validation caches on later training runs.
     # ---------------------------------------------------------
     payload = {
-        "inputs": torch.stack(inputs),
-        "labels": torch.stack(labels),
-        "position_ids": torch.stack(position_ids),
-        "segment_ids": torch.stack(segment_ids),
+        "inputs": inputs,
+        "labels": labels,
+        "position_ids": position_ids,
+        "cu_seqlens": cu_seqlens,
+        "max_seqlens": max_seqlens,
         "metadata": {
             "num_samples": num_samples,
             "max_len": max_len,

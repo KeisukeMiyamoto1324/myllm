@@ -17,13 +17,15 @@ class ValidationDataset:
                 torch.tensor([1, 10, 11, 12, 13, 2, 20, 21]),
                 torch.tensor([10, 11, 12, 13, 2, 0, 21, 2]),
                 torch.tensor([0, 1, 2, 3, 4, 5, 0, 1]),
-                torch.tensor([0, 0, 0, 0, 0, 0, 1, 1]),
+                torch.tensor([0, 6, 8], dtype=torch.int32),
+                6,
             ),
             (
-                torch.tensor([1, 30, 31, 2, 0, 0, 0, 0]),
-                torch.tensor([30, 31, 2, 0, 0, 0, 0, 0]),
-                torch.tensor([0, 1, 2, 3, 0, 0, 0, 0]),
-                torch.tensor([0, 0, 0, 0, -1, -1, -1, -1]),
+                torch.tensor([1, 30, 31, 2]),
+                torch.tensor([30, 31, 2, 0]),
+                torch.tensor([0, 1, 2, 3]),
+                torch.tensor([0, 4], dtype=torch.int32),
+                4,
             ),
         ]
 
@@ -33,7 +35,7 @@ class ValidationDataset:
     def __getitem__(
         self,
         index: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
         return self.samples[index]
 
 

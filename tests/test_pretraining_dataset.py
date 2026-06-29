@@ -12,13 +12,14 @@ from torch.utils.data import IterableDataset
 
 from src.pretraining.dataset import build_tokenized_cache
 from src.pretraining.dataset import LocalTokenizedDataset
+from src.shared.packed_dataset import collate_packed_examples
 from src.pretraining.dataset import PretrainingCorpusDataset
 from src.pretraining.training_corpus_cases import PretrainingCorpusCase
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
 
 
-class FixedTokenDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]):
-    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+class FixedTokenDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]]):
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]]:
         # ---------------------------------------------------------
         # Yield fixed examples so cache metadata can be tested
         # without opening remote datasets.
@@ -27,8 +28,8 @@ class FixedTokenDataset(IterableDataset[tuple[torch.Tensor, torch.Tensor, torch.
             input_ids = torch.tensor([value, value + 1], dtype=torch.long)
             label_ids = torch.tensor([value + 1, 0], dtype=torch.long)
             position_ids = torch.tensor([0, 1], dtype=torch.long)
-            segment_ids = torch.tensor([0, -1], dtype=torch.long)
-            yield input_ids, label_ids, position_ids, segment_ids
+            cu_seqlens = torch.tensor([0, 2], dtype=torch.int32)
+            yield input_ids, label_ids, position_ids, cu_seqlens, 2
 
 
 class FixedTokenizer:
@@ -270,17 +271,18 @@ class PretrainingDatasetTest(unittest.TestCase):
         )
 
         with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
-            input_ids, label_ids, position_ids, segment_ids = next(iter(dataset))
+            input_ids, label_ids, position_ids, cu_seqlens, max_seqlen = next(iter(dataset))
 
         self.assertEqual(input_ids.tolist(), [1, 10, 11, 1, 30, 31])
         self.assertEqual(label_ids.tolist(), [10, 11, 2, 30, 31, 2])
         self.assertEqual(position_ids.tolist(), [0, 1, 2, 0, 1, 2])
-        self.assertEqual(segment_ids.tolist(), [0, 0, 0, 1, 1, 1])
+        self.assertEqual(cu_seqlens.tolist(), [0, 3, 6])
+        self.assertEqual(max_seqlen, 3)
 
     def test_pretraining_corpus_bucket_packs_remaining_segments(self) -> None:
         # ---------------------------------------------------------
         # Flush all buffered segments at stream end so short leftover
-        # documents are still emitted as padded packed samples.
+        # documents are still emitted as compact packed samples.
         # ---------------------------------------------------------
         corpus_case = build_case(name="custom")
         dataset = PretrainingCorpusDataset(
@@ -302,11 +304,42 @@ class PretrainingDatasetTest(unittest.TestCase):
         with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
             examples = list(iter(dataset))
 
-        input_ids, label_ids, position_ids, segment_ids = examples[1]
-        self.assertEqual(input_ids.tolist(), [1, 20, 0, 0, 0, 0])
-        self.assertEqual(label_ids.tolist(), [20, 2, 0, 0, 0, 0])
-        self.assertEqual(position_ids.tolist(), [0, 1, 0, 0, 0, 0])
-        self.assertEqual(segment_ids.tolist(), [0, 0, -1, -1, -1, -1])
+        input_ids, label_ids, position_ids, cu_seqlens, max_seqlen = examples[1]
+        self.assertEqual(input_ids.tolist(), [1, 20])
+        self.assertEqual(label_ids.tolist(), [20, 2])
+        self.assertEqual(position_ids.tolist(), [0, 1])
+        self.assertEqual(cu_seqlens.tolist(), [0, 2])
+        self.assertEqual(max_seqlen, 2)
+
+    def test_collate_packed_examples_builds_global_offsets(self) -> None:
+        # ---------------------------------------------------------
+        # Merge compact packed samples into one flat batch while
+        # preserving document boundaries for varlen attention.
+        # ---------------------------------------------------------
+        examples = [
+            (
+                torch.tensor([1, 10, 1, 20], dtype=torch.long),
+                torch.tensor([10, 2, 20, 2], dtype=torch.long),
+                torch.tensor([0, 1, 0, 1], dtype=torch.long),
+                torch.tensor([0, 2, 4], dtype=torch.int32),
+                2,
+            ),
+            (
+                torch.tensor([1, 30, 31], dtype=torch.long),
+                torch.tensor([30, 31, 2], dtype=torch.long),
+                torch.tensor([0, 1, 2], dtype=torch.long),
+                torch.tensor([0, 3], dtype=torch.int32),
+                3,
+            ),
+        ]
+
+        input_ids, label_ids, position_ids, cu_seqlens, max_seqlen = collate_packed_examples(examples)
+
+        self.assertEqual(input_ids.tolist(), [1, 10, 1, 20, 1, 30, 31])
+        self.assertEqual(label_ids.tolist(), [10, 2, 20, 2, 30, 31, 2])
+        self.assertEqual(position_ids.tolist(), [0, 1, 0, 1, 0, 1, 2])
+        self.assertEqual(cu_seqlens.tolist(), [0, 2, 4, 7])
+        self.assertEqual(max_seqlen, 3)
 
     def test_pretraining_corpus_splits_oversized_documents(self) -> None:
         # ---------------------------------------------------------
@@ -404,7 +437,8 @@ class PretrainingDatasetTest(unittest.TestCase):
         self.assertEqual(payload["metadata"]["max_len"], 2)
         self.assertEqual(payload["metadata"]["corpus_signature"], "abc123")
         self.assertTrue(torch.equal(payload["position_ids"][0], torch.tensor([0, 1])))
-        self.assertTrue(torch.equal(payload["segment_ids"][0], torch.tensor([0, -1])))
+        self.assertTrue(torch.equal(payload["cu_seqlens"][0], torch.tensor([0, 2], dtype=torch.int32)))
+        self.assertEqual(payload["max_seqlens"][0], 2)
 
     def test_local_tokenized_dataset_rejects_metadata_mismatch(self) -> None:
         # ---------------------------------------------------------

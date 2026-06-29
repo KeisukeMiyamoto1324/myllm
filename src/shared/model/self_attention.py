@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+try:
+    from flash_attn import flash_attn_varlen_qkvpacked_func
+except ModuleNotFoundError:
+    flash_attn_varlen_qkvpacked_func = None
+
 from src.shared.model.kv_cache import LayerKeyValueCache
 
 RotaryPositionCache = tuple[torch.Tensor, torch.Tensor]
@@ -29,18 +34,13 @@ class Attention(nn.Module):
         # Project inputs into query, key, and value spaces and merge
         # the heads back into the model dimension after attention.
         # ---------------------------------------------------------
-        self.W_q = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-        self.W_k = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-        self.W_v = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
+        self.W_qkv = nn.Linear(in_features=d_model, out_features=d_model * 3, bias=False)
         self.W_o = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
-        rotary_indexes = torch.arange(start=0, end=self.head_dim, step=2).float()
-        rotary_frequencies = 1.0 / (10000.0 ** (rotary_indexes / self.head_dim))
-        self.register_buffer("rotary_frequencies", rotary_frequencies)
 
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Rearrange the last dimension into head count and head size
-        # so attention can be computed independently per head.
+        # Rearrange batched hidden states into attention heads for
+        # the cached inference path.
         # ---------------------------------------------------------
         batch_size, seq_len, _ = x.size()
         reshaped = x.view(batch_size, seq_len, self.num_heads, self.head_dim)
@@ -65,8 +65,8 @@ class Attention(nn.Module):
         # keeping values unchanged for scaled dot-product attention.
         # ---------------------------------------------------------
         cosine, sine = rotary_position_cache
-        cosine = cosine.to(device=x.device, dtype=x.dtype)
-        sine = sine.to(device=x.device, dtype=x.dtype)
+        cosine = cosine.to(device=x.device, dtype=x.dtype).unsqueeze(1)
+        sine = sine.to(device=x.device, dtype=x.dtype).unsqueeze(1)
         even_values = x[..., 0::2]
         odd_values = x[..., 1::2]
         rotated = torch.stack(
@@ -82,22 +82,56 @@ class Attention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
-        is_causal: bool = False,
-        attention_mask: torch.Tensor | None = None,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Create the projected queries, keys, and values for each
-        # attention head and apply RoPE to queries and keys.
+        # Project compact tokens into packed QKV and run CUDA
+        # FlashAttention varlen without materializing masks.
         # ---------------------------------------------------------
+        if flash_attn_varlen_qkvpacked_func is None:
+            raise RuntimeError("flash-attn is required for FlashAttention-2 varlen training")
+
+        qkv = self.W_qkv(hidden_states).view(-1, 3, self.num_heads, self.head_dim)
         q = self._apply_rotary_position(
-            self._split_heads(self.W_q(hidden_states)),
+            qkv[:, 0],
             rotary_position_cache=rotary_position_cache,
         )
         k = self._apply_rotary_position(
-            self._split_heads(self.W_k(hidden_states)),
+            qkv[:, 1],
             rotary_position_cache=rotary_position_cache,
         )
-        v = self._split_heads(self.W_v(hidden_states))
+        qkv = torch.stack((q, k, qkv[:, 2]), dim=1)
+        attention_scores = flash_attn_varlen_qkvpacked_func(
+            qkv,
+            cu_seqlens,
+            max_seqlen,
+            dropout_p=0.0,
+            causal=True,
+        )
+        merged_scores = attention_scores.reshape(-1, self.d_model)
+        return self.W_o(merged_scores)
+
+    def forward_with_sdpa(
+        self,
+        hidden_states: torch.Tensor,
+        rotary_position_cache: RotaryPositionCache,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Keep a standard batched attention path for non-cached full
+        # sequence inference while training uses FlashAttention.
+        # ---------------------------------------------------------
+        qkv = self.W_qkv(hidden_states).chunk(3, dim=-1)
+        q = self._apply_rotary_position(
+            self._split_heads(qkv[0]),
+            rotary_position_cache=rotary_position_cache,
+        )
+        k = self._apply_rotary_position(
+            self._split_heads(qkv[1]),
+            rotary_position_cache=rotary_position_cache,
+        )
+        v = self._split_heads(qkv[2])
 
         # ---------------------------------------------------------
         # Use PyTorch's fused scaled dot-product attention so large
@@ -107,7 +141,6 @@ class Attention(nn.Module):
             q,
             k,
             v,
-            attn_mask=attention_mask,
             is_causal=is_causal,
         )
 
@@ -129,15 +162,16 @@ class Attention(nn.Module):
         # Project the current tokens, rotate the current keys, and
         # append cache entries that already include RoPE positions.
         # ---------------------------------------------------------
+        qkv = self.W_qkv(hidden_states).chunk(3, dim=-1)
         q = self._apply_rotary_position(
-            self._split_heads(self.W_q(hidden_states)),
+            self._split_heads(qkv[0]),
             rotary_position_cache=rotary_position_cache,
         )
         current_k = self._apply_rotary_position(
-            self._split_heads(self.W_k(hidden_states)),
+            self._split_heads(qkv[1]),
             rotary_position_cache=rotary_position_cache,
         )
-        current_v = self._split_heads(self.W_v(hidden_states))
+        current_v = self._split_heads(qkv[2])
 
         k = current_k
         v = current_v

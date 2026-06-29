@@ -1,4 +1,5 @@
 import io
+import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,7 +9,7 @@ import torch
 
 from src.pretraining.train import parse_args
 from src.shared.model.transformer import DecoderOnlyTransformer
-from src.shared.model.transformer import build_packed_attention_mask
+from src.shared.model.transformer import normalize_training_batch
 from src.shared.model.transformer import resolve_warmup_cosine_learning_rate
 
 
@@ -26,7 +27,7 @@ class PretrainingTrainTest(unittest.TestCase):
         self.assertEqual(args.num_layers, 16)
         self.assertEqual(args.num_heads, 12)
         self.assertEqual(args.d_ff, 3072)
-        self.assertEqual(args.batch_size, 96)
+        self.assertEqual(args.batch_size, 24)
         self.assertEqual(args.devices, "auto")
         self.assertEqual(args.output_path, "models/lambda-160m")
 
@@ -106,30 +107,32 @@ class PretrainingTrainTest(unittest.TestCase):
             min_learning_rate,
         )
 
-    def test_build_packed_attention_mask_blocks_other_segments(self) -> None:
+    def test_normalize_training_batch_builds_varlen_offsets(self) -> None:
         # ---------------------------------------------------------
-        # Keep packed attention causal inside each segment and block
-        # tokens from other packed documents.
+        # Convert regular fixed-length batches into flat varlen
+        # inputs so posttraining shares the FlashAttention path.
         # ---------------------------------------------------------
-        segment_ids = torch.tensor([[0, 0, 1, -1]], dtype=torch.long)
-        attention_mask = build_packed_attention_mask(segment_ids=segment_ids)
+        input_tokens = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.long)
+        labels = torch.tensor([[2, 3, 0], [5, 6, 0]], dtype=torch.long)
+        normalized = normalize_training_batch(batch=(input_tokens, labels))
 
-        self.assertEqual(attention_mask.shape, (1, 1, 4, 4))
-        self.assertEqual(
-            attention_mask[0, 0].tolist(),
-            [
-                [True, False, False, False],
-                [True, True, False, False],
-                [False, False, True, False],
-                [True, True, True, False],
-            ],
-        )
+        self.assertEqual(normalized[0].tolist(), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(normalized[1].tolist(), [2, 3, 0, 5, 6, 0])
+        self.assertEqual(normalized[2].tolist(), [0, 1, 2, 0, 1, 2])
+        self.assertEqual(normalized[3].tolist(), [0, 3, 6])
+        self.assertEqual(normalized[4], 3)
 
     def test_transformer_computes_loss_for_packed_batch(self) -> None:
         # ---------------------------------------------------------
-        # Run one packed batch through the model using explicit
-        # position ids and segment ids.
+        # Run one packed batch through the CUDA FlashAttention path
+        # using explicit position ids and cu_seqlens.
         # ---------------------------------------------------------
+        if not torch.cuda.is_available():
+            self.skipTest("FlashAttention varlen loss requires CUDA")
+
+        if importlib.util.find_spec("flash_attn") is None:
+            self.skipTest("flash_attn is not installed")
+
         model = DecoderOnlyTransformer(
             num_tokens=16,
             d_model=8,
@@ -138,16 +141,17 @@ class PretrainingTrainTest(unittest.TestCase):
             num_heads=2,
             d_ff=16,
             pad_token_id=0,
-        )
-        input_tokens = torch.tensor([[1, 3, 1, 4]], dtype=torch.long)
-        labels = torch.tensor([[3, 2, 4, 2]], dtype=torch.long)
-        position_ids = torch.tensor([[0, 1, 0, 1]], dtype=torch.long)
-        segment_ids = torch.tensor([[0, 0, 1, 1]], dtype=torch.long)
+        ).cuda().to(dtype=torch.bfloat16)
+        input_tokens = torch.tensor([1, 3, 1, 4], dtype=torch.long, device="cuda")
+        labels = torch.tensor([3, 2, 4, 2], dtype=torch.long, device="cuda")
+        position_ids = torch.tensor([0, 1, 0, 1], dtype=torch.long, device="cuda")
+        cu_seqlens = torch.tensor([0, 2, 4], dtype=torch.int32, device="cuda")
         loss = model.compute_chunked_loss(
             input_tokens=input_tokens,
             labels=labels,
             position_ids=position_ids,
-            segment_ids=segment_ids,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=2,
         )
 
         self.assertTrue(torch.isfinite(loss))
