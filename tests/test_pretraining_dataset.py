@@ -384,6 +384,27 @@ class PretrainingDatasetTest(unittest.TestCase):
         self.assertTrue(torch.equal(payload["position_ids"][0], torch.tensor([0, 1])))
         self.assertTrue(torch.equal(payload["segment_ids"][0], torch.tensor([0, -1])))
 
+    def test_build_tokenized_cache_does_not_leave_partial_file(self) -> None:
+        # ---------------------------------------------------------
+        # Keep failed cache writes away from the final path so later
+        # training runs do not treat broken files as valid caches.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "validation.pt"
+
+            with patch("src.shared.atomic_io.torch.save", side_effect=RuntimeError):
+                with self.assertRaises(RuntimeError):
+                    build_tokenized_cache(
+                        dataset=FixedTokenDataset(),
+                        path=path,
+                        num_samples=2,
+                        max_len=2,
+                        metadata={"corpus_signature": "abc123"},
+                    )
+
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(temp_dir).iterdir()), [])
+
     def test_local_tokenized_dataset_rejects_metadata_mismatch(self) -> None:
         # ---------------------------------------------------------
         # Refuse a cache file when an explicit validation path points

@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import IterableDataset
 from torch.utils.data import get_worker_info
 
+from src.shared.atomic_io import atomic_torch_save
 from src.shared.tokenizer import ByteLevelBPE
 from src.shared.training_corpus import TrainingCorpusCase
 from src.shared.console import progress_manager
@@ -418,4 +419,4 @@ def build_tokenized_cache(
             **metadata,
         },
     }
-    torch.save(payload, path)
+    atomic_torch_save(payload=payload, path=path)
