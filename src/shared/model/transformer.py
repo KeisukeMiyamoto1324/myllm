@@ -7,7 +7,8 @@ from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
 
 from src.shared.model.kv_cache import KeyValueCache, LayerKeyValueCache
-from src.shared.model.self_attention import Attention, RotaryPositionCache
+from src.shared.model.position_encoding import PositionEncoding
+from src.shared.model.self_attention import Attention
 
 
 class FeedForward(nn.Module):
@@ -15,22 +16,21 @@ class FeedForward(nn.Module):
         super().__init__()
 
         # ---------------------------------------------------------
-        # Use SwiGLU so the feed-forward path can gate hidden
-        # features before projecting them back to the model width.
+        # Use the standard Transformer feed-forward sublayer so each
+        # token can be transformed independently after attention.
         # ---------------------------------------------------------
-        self.up_projection = nn.Linear(in_features=d_model, out_features=d_ff)
-        self.gate_projection = nn.Linear(in_features=d_model, out_features=d_ff)
-        self.activation = nn.SiLU()
-        self.down_projection = nn.Linear(in_features=d_ff, out_features=d_model)
+        self.linear_1 = nn.Linear(in_features=d_model, out_features=d_ff)
+        self.activation = nn.GELU()
+        self.linear_2 = nn.Linear(in_features=d_ff, out_features=d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Gate the expanded hidden features with SiLU before the
-        # final projection, matching the SwiGLU FFN structure.
+        # Expand the channel dimension, apply a non-linearity, and
+        # project back to the model dimension.
         # ---------------------------------------------------------
-        hidden = self.up_projection(x)
-        gate = self.activation(self.gate_projection(x))
-        return self.down_projection(hidden * gate)
+        hidden = self.linear_1(x)
+        activated = self.activation(hidden)
+        return self.linear_2(activated)
 
 
 class DecoderBlock(nn.Module):
@@ -49,7 +49,6 @@ class DecoderBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        rotary_position_cache: RotaryPositionCache,
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
@@ -59,7 +58,6 @@ class DecoderBlock(nn.Module):
         attention_input = self.norm_1(x)
         attention_output = self.attention(
             attention_input,
-            rotary_position_cache=rotary_position_cache,
             is_causal=attention_mask is None,
             attention_mask=attention_mask,
         )
@@ -76,7 +74,6 @@ class DecoderBlock(nn.Module):
     def forward_with_sdpa(
         self,
         x: torch.Tensor,
-        rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
         # Run PyTorch SDPA for full-sequence inference while
@@ -85,7 +82,6 @@ class DecoderBlock(nn.Module):
         attention_input = self.norm_1(x)
         attention_output = self.attention.forward_with_sdpa(
             attention_input,
-            rotary_position_cache=rotary_position_cache,
         )
         attention_residual = x + attention_output
         feed_forward_input = self.norm_2(attention_residual)
@@ -95,7 +91,6 @@ class DecoderBlock(nn.Module):
     def forward_with_cache(
         self,
         x: torch.Tensor,
-        rotary_position_cache: RotaryPositionCache,
         past_key_value: LayerKeyValueCache | None,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
         # ---------------------------------------------------------
@@ -105,7 +100,6 @@ class DecoderBlock(nn.Module):
         attention_input = self.norm_1(x)
         attention_output, key_value_cache = self.attention.forward_with_cache(
             attention_input,
-            rotary_position_cache=rotary_position_cache,
             past_key_value=past_key_value,
             is_causal=past_key_value is None,
         )
@@ -140,12 +134,12 @@ class DecoderOnlyTransformer(L.LightningModule):
         super().__init__()
 
         # ---------------------------------------------------------
-        # Embed tokens before passing them through RoPE attention
-        # blocks that apply position information inside Q/K space.
+        # Embed tokens and positions before passing them through a
+        # stack of decoder blocks.
         # ---------------------------------------------------------
         self.max_len = max_len
-        self.head_dim = d_model // num_heads
         self.we = nn.Embedding(num_embeddings=num_tokens, embedding_dim=d_model)
+        self.pe = PositionEncoding(d_model=d_model, max_len=max_len)
         self.blocks = nn.ModuleList(
             [DecoderBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff) for _ in range(num_layers)]
         )
@@ -182,29 +176,6 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         self.loss = nn.CrossEntropyLoss(ignore_index=pad_token_id, reduction="sum")
 
-    def build_rotary_position_cache(
-        self,
-        position_ids: torch.Tensor,
-        dtype: torch.dtype,
-    ) -> RotaryPositionCache:
-        # ---------------------------------------------------------
-        # Build RoPE sin/cos values once per forward pass so every
-        # decoder layer and both Q/K rotations can reuse them.
-        # ---------------------------------------------------------
-        rotary_indexes = torch.arange(
-            start=0,
-            end=self.head_dim,
-            step=2,
-            dtype=torch.float,
-            device=position_ids.device,
-        )
-        rotary_frequencies = 1.0 / (10000.0 ** (rotary_indexes / self.head_dim))
-        angles = position_ids.float()[..., None] * rotary_frequencies
-        return (
-            torch.cos(angles).to(dtype=dtype).unsqueeze(-2),
-            torch.sin(angles).to(dtype=dtype).unsqueeze(-2),
-        )
-
     def forward_hidden(
         self,
         token_ids: torch.Tensor,
@@ -212,25 +183,11 @@ class DecoderOnlyTransformer(L.LightningModule):
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Convert token ids into hidden states and create contiguous
-        # positions when packed batches do not supply explicit ids.
+        # Convert token ids into hidden states and apply positional
+        # information before the decoder stack.
         # ---------------------------------------------------------
-        hidden_states = self.we(token_ids)
-
-        if position_ids is None:
-            seq_len = token_ids.size(dim=1)
-            position_ids = torch.arange(
-                start=0,
-                end=seq_len,
-                dtype=torch.long,
-                device=token_ids.device,
-            ).unsqueeze(0)
-            position_ids = position_ids.expand(token_ids.size(dim=0), seq_len)
-
-        rotary_position_cache = self.build_rotary_position_cache(
-            position_ids=position_ids,
-            dtype=hidden_states.dtype,
-        )
+        word_embeddings = self.we(token_ids)
+        hidden_states = self.pe(word_embeddings, position_ids=position_ids)
 
         # ---------------------------------------------------------
         # Reuse the same decoder block interface for every layer to
@@ -239,7 +196,6 @@ class DecoderOnlyTransformer(L.LightningModule):
         for block in self.blocks:
             hidden_states = block(
                 hidden_states,
-                rotary_position_cache=rotary_position_cache,
                 attention_mask=attention_mask,
             )
 
@@ -254,24 +210,11 @@ class DecoderOnlyTransformer(L.LightningModule):
         # Keep the public forward path returning full vocabulary
         # logits for inference and compatibility with callers.
         # ---------------------------------------------------------
-        hidden_states = self.we(token_ids)
-        seq_len = token_ids.size(dim=1)
-        position_ids = torch.arange(
-            start=0,
-            end=seq_len,
-            dtype=torch.long,
-            device=token_ids.device,
-        ).unsqueeze(0)
-        position_ids = position_ids.expand(token_ids.size(dim=0), seq_len)
-        rotary_position_cache = self.build_rotary_position_cache(
-            position_ids=position_ids,
-            dtype=hidden_states.dtype,
-        )
+        hidden_states = self.pe(self.we(token_ids))
 
         for block in self.blocks:
             hidden_states = block.forward_with_sdpa(
                 hidden_states,
-                rotary_position_cache=rotary_position_cache,
             )
 
         return self.fc_layer(self.final_norm(hidden_states))
@@ -282,27 +225,16 @@ class DecoderOnlyTransformer(L.LightningModule):
         past_key_values: KeyValueCache | None,
     ) -> tuple[torch.Tensor, KeyValueCache]:
         # ---------------------------------------------------------
-        # Offset RoPE positions by the cached sequence length so
-        # cached generation matches the full-sequence forward path.
+        # Offset positions by the cached sequence length so one-token
+        # inference matches full-sequence absolute positions.
         # ---------------------------------------------------------
         position_offset = 0
 
         if past_key_values is not None:
-            position_offset = past_key_values[0][0].size(dim=1)
+            position_offset = past_key_values[0][0].size(dim=2)
 
-        seq_len = token_ids.size(dim=1)
-        hidden_states = self.we(token_ids)
-        position_ids = torch.arange(
-            start=position_offset,
-            end=position_offset + seq_len,
-            dtype=torch.long,
-            device=token_ids.device,
-        ).unsqueeze(0)
-        position_ids = position_ids.expand(token_ids.size(dim=0), seq_len)
-        rotary_position_cache = self.build_rotary_position_cache(
-            position_ids=position_ids,
-            dtype=hidden_states.dtype,
-        )
+        word_embeddings = self.we(token_ids)
+        hidden_states = self.pe(word_embeddings, position_offset=position_offset)
         next_key_values: KeyValueCache = []
 
         # ---------------------------------------------------------
@@ -313,7 +245,6 @@ class DecoderOnlyTransformer(L.LightningModule):
             past_key_value = None if past_key_values is None else past_key_values[layer_index]
             hidden_states, key_value_cache = block.forward_with_cache(
                 hidden_states,
-                rotary_position_cache,
                 past_key_value,
             )
             next_key_values.append(key_value_cache)

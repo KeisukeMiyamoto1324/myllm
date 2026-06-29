@@ -96,7 +96,17 @@ def load_pytorch_model(
         map_location=map_location,
         weights_only=True,
     )
-    model.load_state_dict(model_state)
+
+    # ---------------------------------------------------------
+    # Keep the regenerated sinusoidal table when callers request a
+    # different context length from the saved model metadata.
+    # ---------------------------------------------------------
+    changed_max_len = max_len is not None and int(model_config["max_len"]) != max_len
+
+    if changed_max_len:
+        model_state.pop("pe.pe")
+
+    model.load_state_dict(model_state, strict=not changed_max_len)
     return model, model_config
 
 

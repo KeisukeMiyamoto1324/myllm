@@ -24,7 +24,7 @@ def build_model_config() -> dict[str, int | float | str]:
         "num_layers": 2,
         "num_heads": 2,
         "d_ff": 16,
-        "ffn_type": "swiglu",
+        "ffn_type": "gelu",
         "learning_rate": 0.1,
         "pad_token_id": 0,
         "bos_token_id": 1,
@@ -80,7 +80,7 @@ class PretrainingPytorchArtifactsTest(unittest.TestCase):
     def test_load_pytorch_model_applies_requested_max_len_metadata(self) -> None:
         # ---------------------------------------------------------
         # Keep learned weights while applying the requested context
-        # length metadata used by RoPE training and datasets.
+        # length metadata used by absolute positions and datasets.
         # ---------------------------------------------------------
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir)

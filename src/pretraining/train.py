@@ -305,7 +305,7 @@ def main() -> None:
         "num_layers": args.num_layers,
         "num_heads": args.num_heads,
         "d_ff": args.d_ff,
-        "ffn_type": "swiglu",
+        "ffn_type": "gelu",
         "attention_backend": "pytorch_sdpa_masked",
         "requires_cuda": False,
         "learning_rate": args.learning_rate,

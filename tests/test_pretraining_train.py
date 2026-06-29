@@ -185,26 +185,10 @@ class PretrainingTrainTest(unittest.TestCase):
         torch.testing.assert_close(masked_hidden[:, :3], row_hidden[:1], atol=1e-6, rtol=1e-6)
         torch.testing.assert_close(masked_hidden[:, 3], row_hidden[1, 0].unsqueeze(0), atol=1e-6, rtol=1e-6)
 
-    def test_transformer_rejects_odd_rotary_head_dim(self) -> None:
+    def test_explicit_position_ids_match_absolute_positions(self) -> None:
         # ---------------------------------------------------------
-        # Reject head dimensions that cannot be split into rotary
-        # even/odd pairs for query and key rotation.
-        # ---------------------------------------------------------
-        with self.assertRaises(ValueError):
-            DecoderOnlyTransformer(
-                num_tokens=16,
-                d_model=6,
-                max_len=4,
-                num_layers=1,
-                num_heads=2,
-                d_ff=16,
-                pad_token_id=0,
-            )
-
-    def test_rotary_position_cache_matches_attention_layout(self) -> None:
-        # ---------------------------------------------------------
-        # Keep RoPE caches directly broadcastable to the shared
-        # batch, sequence, heads, and head-dimension layout.
+        # Keep packed position ids aligned with the absolute
+        # sinusoidal position encoding.
         # ---------------------------------------------------------
         model = DecoderOnlyTransformer(
             num_tokens=16,
@@ -215,25 +199,22 @@ class PretrainingTrainTest(unittest.TestCase):
             d_ff=16,
             pad_token_id=0,
         )
+        token_ids = torch.tensor([[1, 3, 4], [1, 3, 4]], dtype=torch.long)
         position_ids = torch.tensor([[0, 1, 2], [0, 1, 2]], dtype=torch.long)
-        rotary_position_cache = model.build_rotary_position_cache(
-            position_ids=position_ids,
-            dtype=torch.float32,
-        )
-        attention = model.blocks[0].attention
-        hidden_states = torch.randn(2, 3, 2, 4)
 
-        rotated = attention._apply_rotary_position(
-            hidden_states,
-            rotary_position_cache=rotary_position_cache,
-        )
+        with torch.no_grad():
+            default_hidden = model.forward_hidden(token_ids=token_ids)
+            explicit_hidden = model.forward_hidden(
+                token_ids=token_ids,
+                position_ids=position_ids,
+            )
 
-        self.assertEqual(rotated.shape, hidden_states.shape)
+        torch.testing.assert_close(explicit_hidden, default_hidden)
 
-    def test_forward_with_cache_uses_sequence_major_cache(self) -> None:
+    def test_forward_with_cache_uses_head_major_cache(self) -> None:
         # ---------------------------------------------------------
-        # Store cached keys and values in the same sequence-major
-        # layout used before PyTorch attention transposes them.
+        # Store cached keys and values in the same head-major layout
+        # used by PyTorch scaled dot-product attention.
         # ---------------------------------------------------------
         model = DecoderOnlyTransformer(
             num_tokens=16,
@@ -257,7 +238,7 @@ class PretrainingTrainTest(unittest.TestCase):
 
     def test_forward_with_cache_matches_full_forward(self) -> None:
         # ---------------------------------------------------------
-        # Verify one-token cached inference uses the same RoPE
+        # Verify one-token cached inference uses the same absolute
         # positions as the full causal forward pass.
         # ---------------------------------------------------------
         torch.manual_seed(7)

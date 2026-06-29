@@ -271,7 +271,7 @@ def main() -> None:
         "global_batch_size": args.batch_size * device_count,
         "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
         "global_effective_batch_size": args.batch_size * args.gradient_accumulation_steps * device_count,
-        "ffn_type": "swiglu",
+        "ffn_type": "gelu",
         "attention_backend": "pytorch_sdpa_masked",
         "requires_cuda": False,
         "lr_schedule": "warmup_cosine",
