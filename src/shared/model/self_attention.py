@@ -39,30 +39,14 @@ class Attention(nn.Module):
         self.W_qkv = nn.Linear(in_features=d_model, out_features=d_model * 3, bias=False)
         self.W_o = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
 
-    def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
-        # ---------------------------------------------------------
-        # Rearrange batched hidden states into the shared attention
-        # layout used by full and cached inference.
-        # ---------------------------------------------------------
-        batch_size, seq_len, _ = x.size()
-        return x.view(batch_size, seq_len, self.num_heads, self.head_dim)
-
-    def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
-        # ---------------------------------------------------------
-        # Restore the tensor to the original model dimension after
-        # per-head attention has been combined.
-        # ---------------------------------------------------------
-        batch_size, seq_len, _, _ = x.size()
-        return x.contiguous().view(batch_size, seq_len, self.d_model)
-
     def _apply_rotary_position(
         self,
         x: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Rotate each query/key pair with the shared RoPE cache while
-        # keeping values unchanged for scaled dot-product attention.
+        # Rotate query or key tensors in the FlashAttention layout:
+        # sequence dimensions first, then heads, then head features.
         # ---------------------------------------------------------
         cosine, sine = rotary_position_cache
         cosine = cosine.to(device=x.device, dtype=x.dtype)
@@ -85,23 +69,27 @@ class Attention(nn.Module):
         cu_seqlens: torch.Tensor,
         max_seqlen: int,
     ) -> torch.Tensor:
-        # ---------------------------------------------------------
-        # Project compact tokens into packed QKV and run CUDA
-        # FlashAttention varlen without materializing masks.
-        # ---------------------------------------------------------
         if flash_attn_varlen_qkvpacked_func is None:
             raise RuntimeError("flash-attn is required for FlashAttention-2 varlen training")
 
+        # ---------------------------------------------------------
+        # Build packed QKV directly in the varlen FlashAttention
+        # layout and rotate only the query and key slices.
+        # ---------------------------------------------------------
         qkv = self.W_qkv(hidden_states).view(-1, 3, self.num_heads, self.head_dim)
-        q = self._apply_rotary_position(
+        qkv[:, 0] = self._apply_rotary_position(
             qkv[:, 0],
             rotary_position_cache=rotary_position_cache,
         )
-        k = self._apply_rotary_position(
+        qkv[:, 1] = self._apply_rotary_position(
             qkv[:, 1],
             rotary_position_cache=rotary_position_cache,
         )
-        qkv = torch.stack((q, k, qkv[:, 2]), dim=1)
+
+        # ---------------------------------------------------------
+        # Run causal varlen FlashAttention on packed tokens without
+        # creating an explicit attention mask.
+        # ---------------------------------------------------------
         attention_scores = flash_attn_varlen_qkvpacked_func(
             qkv,
             cu_seqlens,
@@ -117,13 +105,13 @@ class Attention(nn.Module):
         hidden_states: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
-        # ---------------------------------------------------------
-        # Use FlashAttention for full-sequence causal inference so
-        # prefill follows the same CUDA backend as varlen training.
-        # ---------------------------------------------------------
         if flash_attn_qkvpacked_func is None:
             raise RuntimeError("flash-attn is required for FlashAttention-2 inference")
 
+        # ---------------------------------------------------------
+        # Build packed QKV in full-sequence FlashAttention layout and
+        # keep RoPE broadcast on the sequence axis, not the head axis.
+        # ---------------------------------------------------------
         batch_size, seq_len, _ = hidden_states.size()
         qkv = self.W_qkv(hidden_states).view(
             batch_size,
@@ -132,25 +120,24 @@ class Attention(nn.Module):
             self.num_heads,
             self.head_dim,
         )
-        q = self._apply_rotary_position(
+        qkv[:, :, 0] = self._apply_rotary_position(
             qkv[:, :, 0],
             rotary_position_cache=rotary_position_cache,
         )
-        k = self._apply_rotary_position(
+        qkv[:, :, 1] = self._apply_rotary_position(
             qkv[:, :, 1],
             rotary_position_cache=rotary_position_cache,
         )
-        qkv = torch.stack((q, k, qkv[:, :, 2]), dim=2)
+
+        # ---------------------------------------------------------
+        # Run full-sequence causal FlashAttention and merge the head
+        # dimension back into the model width.
+        # ---------------------------------------------------------
         attention_scores = flash_attn_qkvpacked_func(
             qkv,
             dropout_p=0.0,
             causal=True,
         )
-
-        # ---------------------------------------------------------
-        # Merge the attended heads and project the result back into
-        # the model dimension for the next layer.
-        # ---------------------------------------------------------
         merged_scores = attention_scores.reshape(batch_size, seq_len, self.d_model)
         return self.W_o(merged_scores)
 
@@ -162,19 +149,23 @@ class Attention(nn.Module):
         is_causal: bool = False,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
         # ---------------------------------------------------------
-        # Project the current tokens, rotate the current keys, and
-        # append cache entries that already include RoPE positions.
+        # Build packed QKV in the same sequence-major layout used by
+        # FlashAttention, then keep rotated keys in that cache layout.
         # ---------------------------------------------------------
-        qkv = self.W_qkv(hidden_states).chunk(3, dim=-1)
-        q = self._apply_rotary_position(
-            self._split_heads(qkv[0]),
-            rotary_position_cache=rotary_position_cache,
+        batch_size, seq_len, _ = hidden_states.size()
+        qkv = self.W_qkv(hidden_states).view(
+            batch_size,
+            seq_len,
+            3,
+            self.num_heads,
+            self.head_dim,
         )
+        q = self._apply_rotary_position(qkv[:, :, 0], rotary_position_cache=rotary_position_cache)
         current_k = self._apply_rotary_position(
-            self._split_heads(qkv[1]),
+            qkv[:, :, 1],
             rotary_position_cache=rotary_position_cache,
         )
-        current_v = self._split_heads(qkv[2])
+        current_v = qkv[:, :, 2]
 
         k = current_k
         v = current_v
@@ -185,8 +176,8 @@ class Attention(nn.Module):
             v = torch.cat((past_v, current_v), dim=1)
 
         # ---------------------------------------------------------
-        # Attend the current query positions over cached and current
-        # keys with the fused scaled dot-product implementation.
+        # Keep the cache in FlashAttention layout, then transpose only
+        # at the PyTorch attention boundary used for token decoding.
         # ---------------------------------------------------------
         attention_scores = F.scaled_dot_product_attention(
             q.transpose(1, 2),
@@ -195,9 +186,9 @@ class Attention(nn.Module):
             is_causal=is_causal,
         )
 
-        # ---------------------------------------------------------
-        # Return both the attention result and the updated cache for
-        # this layer so the caller can feed the next token directly.
-        # ---------------------------------------------------------
-        merged_scores = self._merge_heads(attention_scores.transpose(1, 2))
+        merged_scores = attention_scores.transpose(1, 2).contiguous().view(
+            batch_size,
+            seq_len,
+            self.d_model,
+        )
         return self.W_o(merged_scores), (k, v)
