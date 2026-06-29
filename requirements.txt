@@ -13,8 +13,8 @@ cycler==0.12.1
 datasets==4.8.5
 dill==0.4.1
 filelock==3.29.0
-torch==2.11.0
-flash-attn>=2.8.3.post1,<3
+--extra-index-url https://download.pytorch.org/whl/cu129
+torch==2.11.0+cu129
 fonttools==4.62.1
 frozenlist==1.8.0
 fsspec==2026.2.0
