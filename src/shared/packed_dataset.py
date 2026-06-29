@@ -18,6 +18,7 @@ PackedTrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Te
 PackedTrainingSegment = tuple[list[int], list[int], int]
 BUCKET_PACKING_BUFFER_SEGMENTS = 4096
 BUCKET_PACKING_SEED = 17
+WorkerShard = tuple[int, int]
 
 
 class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
@@ -55,19 +56,26 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
 
     def __iter__(self) -> Iterator[PackedTrainingExample]:
         # ---------------------------------------------------------
-        # Repeat complete streaming corpus passes inside each worker
-        # so training can be bounded only by Lightning max_steps.
+        # Repeat randomized streaming windows inside each worker so
+        # training is bounded by Lightning max_steps, not by shards.
         # ---------------------------------------------------------
         pass_index = 0
 
         while True:
-            yield from self._iter_corpus_pass(pass_index=pass_index)
+            yield from self._iter_corpus_pass(
+                pass_index=pass_index,
+                repeat_forever=self.repeat_forever,
+            )
             pass_index += 1
 
             if not self.repeat_forever:
                 break
 
-    def _iter_corpus_pass(self, pass_index: int) -> Iterator[PackedTrainingExample]:
+    def _iter_corpus_pass(
+        self,
+        pass_index: int,
+        repeat_forever: bool,
+    ) -> Iterator[PackedTrainingExample]:
         # ---------------------------------------------------------
         # Open the configured corpus split as a streaming source so
         # samples are never materialized in local memory.
@@ -90,29 +98,20 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
         )
 
         # ---------------------------------------------------------
-        # Shuffle each corpus pass with a distinct fixed seed, then
-        # shard the same order across ranks and workers.
+        # Use shard ids for finite streams. Use them as seed ids for
+        # repeated streams so workers do not repeat uneven shards.
         # ---------------------------------------------------------
+        shard_count, shard_index = self._resolve_worker_shard()
+        seed_offset = pass_index * shard_count if repeat_forever else pass_index
+        seed = self.shuffle_seed + seed_offset + shard_index
+
         if self.shuffle_buffer_size > 0:
             dataset = dataset.shuffle(
-                seed=self.shuffle_seed + pass_index,
+                seed=seed,
                 buffer_size=self.shuffle_buffer_size,
             )
 
-        worker_info = get_worker_info()
-        worker_count = 1 if worker_info is None else worker_info.num_workers
-        worker_index = 0 if worker_info is None else worker_info.id
-        rank_count = 1
-        rank_index = 0
-
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            rank_count = torch.distributed.get_world_size()
-            rank_index = torch.distributed.get_rank()
-
-        shard_count = rank_count * worker_count
-        shard_index = rank_index * worker_count + worker_index
-
-        if shard_count > 1:
+        if shard_count > 1 and not repeat_forever:
             dataset = dataset.shard(num_shards=shard_count, index=shard_index)
 
         segment_buffer: list[PackedTrainingSegment] = []
@@ -135,6 +134,25 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
 
         while len(segment_buffer) > 0:
             yield self._build_bucket_packed_example(segment_buffer=segment_buffer)
+
+    def _resolve_worker_shard(self) -> WorkerShard:
+        # ---------------------------------------------------------
+        # Combine DDP rank and DataLoader worker ids into one stable
+        # global worker id used for sharding or stream seeding.
+        # ---------------------------------------------------------
+        worker_info = get_worker_info()
+        worker_count = 1 if worker_info is None else worker_info.num_workers
+        worker_index = 0 if worker_info is None else worker_info.id
+        rank_count = 1
+        rank_index = 0
+
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank_count = torch.distributed.get_world_size()
+            rank_index = torch.distributed.get_rank()
+
+        shard_count = rank_count * worker_count
+        shard_index = rank_index * worker_count + worker_index
+        return shard_count, shard_index
 
     def _contains_partition(
         self,

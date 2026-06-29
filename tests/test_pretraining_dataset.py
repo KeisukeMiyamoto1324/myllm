@@ -220,6 +220,38 @@ class PretrainingDatasetTest(unittest.TestCase):
         input_token_ids = [example[0][1].item() for example in examples]
         self.assertEqual(sorted(input_token_ids), [40, 80])
 
+    def test_repeating_corpus_uses_worker_seed_without_sharding(self) -> None:
+        # ---------------------------------------------------------
+        # Let repeated training streams read the full corpus with a
+        # worker-specific seed instead of repeating uneven shards.
+        # ---------------------------------------------------------
+        dataset = PretrainingCorpusDataset(
+            corpus_case=build_case(name="custom"),
+            tokenizer=FixedTokenizer(),
+            max_len=2,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+            shuffle_buffer_size=10000,
+            shuffle_seed=17,
+            repeat_forever=True,
+        )
+        fake_dataset = FakeStreamingDataset(
+            samples=[
+                {"text": "10"},
+                {"text": "20"},
+                {"text": "30"},
+                {"text": "40"},
+            ]
+        )
+        worker_info = type("WorkerInfo", (), {"num_workers": 2, "id": 1})()
+
+        with patch("src.shared.packed_dataset.load_dataset", return_value=fake_dataset):
+            with patch("src.shared.packed_dataset.get_worker_info", return_value=worker_info):
+                examples = [example[0][1].item() for example in islice(dataset, 4)]
+
+        self.assertEqual(sorted(examples), [10, 20, 30, 40])
+
     def test_pretraining_corpus_keeps_wikipedia_urls(self) -> None:
         # ---------------------------------------------------------
         # Keep Wikipedia documents because the single FineWeb corpus
