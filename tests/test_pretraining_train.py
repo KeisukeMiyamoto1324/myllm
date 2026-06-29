@@ -188,6 +188,32 @@ class PretrainingTrainTest(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     parse_args()
 
+    def test_optimizer_excludes_embedding_norm_and_bias_from_weight_decay(self) -> None:
+        # ---------------------------------------------------------
+        # Keep regular matrix weights decayed while excluding token
+        # embeddings, normalization parameters, and bias parameters.
+        # ---------------------------------------------------------
+        model = DecoderOnlyTransformer(
+            num_tokens=12,
+            d_model=8,
+            num_layers=2,
+            num_heads=2,
+            d_ff=16,
+            pad_token_id=0,
+        )
+        optimizer = model.configure_optimizers()
+        decay_group = next(group for group in optimizer.param_groups if group["weight_decay"] > 0.0)
+        no_decay_group = next(group for group in optimizer.param_groups if group["weight_decay"] == 0.0)
+        decay_parameter_ids = {id(parameter) for parameter in decay_group["params"]}
+        no_decay_parameter_ids = {id(parameter) for parameter in no_decay_group["params"]}
+
+        self.assertIn(id(model.blocks[0].attention.W_q.weight), decay_parameter_ids)
+        self.assertIn(id(model.blocks[0].feed_forward.gate_proj.weight), decay_parameter_ids)
+        self.assertIn(id(model.we.weight), no_decay_parameter_ids)
+        self.assertIn(id(model.final_norm.weight), no_decay_parameter_ids)
+        self.assertIn(id(model.blocks[0].norm_1.weight), no_decay_parameter_ids)
+        self.assertIn(id(model.blocks[0].feed_forward.gate_proj.bias), no_decay_parameter_ids)
+
     def test_resolve_warmup_cosine_learning_rate(self) -> None:
         # ---------------------------------------------------------
         # Match the modern pretraining schedule: zero start, linear

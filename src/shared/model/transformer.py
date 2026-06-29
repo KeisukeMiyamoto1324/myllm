@@ -11,6 +11,9 @@ from src.shared.model.position_encoding import RotaryPositionEmbedding
 from src.shared.model.self_attention import Attention
 
 
+WEIGHT_DECAY = 0.01
+
+
 class FeedForward(nn.Module):
     def __init__(self, d_model: int, d_ff: int) -> None:
         super().__init__()
@@ -264,12 +267,15 @@ class DecoderOnlyTransformer(L.LightningModule):
 
     def configure_optimizers(self) -> AdamW | dict[str, object]:
         # ---------------------------------------------------------
-        # Use AdamW for decoupled weight decay and enable the fused
-        # CUDA implementation only when the training script requests it.
+        # Use AdamW with decay only on matrix weights while keeping
+        # embeddings, norms, and biases out of weight decay.
         # ---------------------------------------------------------
-        trainable_parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
+        parameter_groups = build_weight_decay_parameter_groups(
+            model=self,
+            weight_decay=WEIGHT_DECAY,
+        )
         optimizer = AdamW(
-            trainable_parameters,
+            parameter_groups,
             lr=self.learning_rate,
             fused=self.use_fused_optimizer,
         )
@@ -388,6 +394,36 @@ def normalize_training_batch(
 
     input_tokens, labels, position_ids, segment_ids = batch
     return input_tokens, labels, position_ids, segment_ids
+
+
+def build_weight_decay_parameter_groups(
+    model: nn.Module,
+    weight_decay: float,
+) -> list[dict[str, object]]:
+    # ---------------------------------------------------------
+    # Apply decay to projection matrices only. Keep embeddings,
+    # normalization parameters, and biases free from weight decay.
+    # ---------------------------------------------------------
+    no_decay_parameter_ids = {
+        id(parameter)
+        for module in model.modules()
+        if isinstance(module, (nn.Embedding, nn.RMSNorm, nn.LayerNorm))
+        for parameter in module.parameters(recurse=False)
+    }
+    decay_parameters = [
+        parameter
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad and id(parameter) not in no_decay_parameter_ids and not name.endswith(".bias")
+    ]
+    no_decay_parameters = [
+        parameter
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad and (id(parameter) in no_decay_parameter_ids or name.endswith(".bias"))
+    ]
+    return [
+        {"params": decay_parameters, "weight_decay": weight_decay},
+        {"params": no_decay_parameters, "weight_decay": 0.0},
+    ]
 
 
 def build_packed_attention_mask(segment_ids: torch.Tensor) -> torch.Tensor:
