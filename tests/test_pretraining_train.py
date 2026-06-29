@@ -172,6 +172,60 @@ class PretrainingTrainTest(unittest.TestCase):
                 pad_token_id=0,
             )
 
+    def test_rotary_position_cache_matches_attention_layout(self) -> None:
+        # ---------------------------------------------------------
+        # Keep RoPE caches directly broadcastable to the shared
+        # batch, sequence, heads, and head-dimension layout.
+        # ---------------------------------------------------------
+        model = DecoderOnlyTransformer(
+            num_tokens=16,
+            d_model=8,
+            max_len=4,
+            num_layers=1,
+            num_heads=2,
+            d_ff=16,
+            pad_token_id=0,
+        )
+        position_ids = torch.tensor([[0, 1, 2], [0, 1, 2]], dtype=torch.long)
+        rotary_position_cache = model.build_rotary_position_cache(
+            position_ids=position_ids,
+            dtype=torch.float32,
+        )
+        attention = model.blocks[0].attention
+        hidden_states = torch.randn(2, 3, 2, 4)
+
+        rotated = attention._apply_rotary_position(
+            hidden_states,
+            rotary_position_cache=rotary_position_cache,
+        )
+
+        self.assertEqual(rotated.shape, hidden_states.shape)
+
+    def test_forward_with_cache_uses_sequence_major_cache(self) -> None:
+        # ---------------------------------------------------------
+        # Store cached keys and values in the same sequence-major
+        # layout used before PyTorch attention transposes them.
+        # ---------------------------------------------------------
+        model = DecoderOnlyTransformer(
+            num_tokens=16,
+            d_model=8,
+            max_len=4,
+            num_layers=1,
+            num_heads=2,
+            d_ff=16,
+            pad_token_id=0,
+        )
+        token_ids = torch.tensor([[1, 3], [4, 2]], dtype=torch.long)
+
+        logits, past_key_values = model.forward_with_cache(
+            token_ids=token_ids,
+            past_key_values=None,
+        )
+
+        self.assertEqual(logits.shape, (2, 2, 16))
+        self.assertEqual(past_key_values[0][0].shape, (2, 2, 2, 4))
+        self.assertEqual(past_key_values[0][1].shape, (2, 2, 2, 4))
+
     def test_forward_with_cache_matches_full_forward(self) -> None:
         # ---------------------------------------------------------
         # Verify one-token cached inference uses the same RoPE

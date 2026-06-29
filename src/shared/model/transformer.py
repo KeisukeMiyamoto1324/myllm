@@ -201,7 +201,10 @@ class DecoderOnlyTransformer(L.LightningModule):
         )
         rotary_frequencies = 1.0 / (10000.0 ** (rotary_indexes / self.head_dim))
         angles = position_ids.float()[..., None] * rotary_frequencies
-        return torch.cos(angles).to(dtype=dtype), torch.sin(angles).to(dtype=dtype)
+        return (
+            torch.cos(angles).to(dtype=dtype).unsqueeze(-2),
+            torch.sin(angles).to(dtype=dtype).unsqueeze(-2),
+        )
 
     def forward_hidden(
         self,
@@ -299,7 +302,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         position_offset = 0
 
         if past_key_values is not None:
-            position_offset = past_key_values[0][0].size(dim=2)
+            position_offset = past_key_values[0][0].size(dim=1)
 
         seq_len = token_ids.size(dim=1)
         hidden_states = self.we(token_ids)

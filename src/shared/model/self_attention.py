@@ -41,21 +41,19 @@ class Attention(nn.Module):
 
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Rearrange batched hidden states into attention heads for
-        # the cached inference path.
+        # Rearrange batched hidden states into the shared attention
+        # layout used by full and cached inference.
         # ---------------------------------------------------------
         batch_size, seq_len, _ = x.size()
-        reshaped = x.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        return reshaped.transpose(1, 2)
+        return x.view(batch_size, seq_len, self.num_heads, self.head_dim)
 
     def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
         # ---------------------------------------------------------
         # Restore the tensor to the original model dimension after
         # per-head attention has been combined.
         # ---------------------------------------------------------
-        batch_size, _, seq_len, _ = x.size()
-        transposed = x.transpose(1, 2).contiguous()
-        return transposed.view(batch_size, seq_len, self.d_model)
+        batch_size, seq_len, _, _ = x.size()
+        return x.contiguous().view(batch_size, seq_len, self.d_model)
 
     def _apply_rotary_position(
         self,
@@ -67,8 +65,8 @@ class Attention(nn.Module):
         # keeping values unchanged for scaled dot-product attention.
         # ---------------------------------------------------------
         cosine, sine = rotary_position_cache
-        cosine = cosine.to(device=x.device, dtype=x.dtype).unsqueeze(1)
-        sine = sine.to(device=x.device, dtype=x.dtype).unsqueeze(1)
+        cosine = cosine.to(device=x.device, dtype=x.dtype)
+        sine = sine.to(device=x.device, dtype=x.dtype)
         even_values = x[..., 0::2]
         odd_values = x[..., 1::2]
         rotated = torch.stack(
@@ -183,17 +181,17 @@ class Attention(nn.Module):
 
         if past_key_value is not None:
             past_k, past_v = past_key_value
-            k = torch.cat((past_k, current_k), dim=2)
-            v = torch.cat((past_v, current_v), dim=2)
+            k = torch.cat((past_k, current_k), dim=1)
+            v = torch.cat((past_v, current_v), dim=1)
 
         # ---------------------------------------------------------
         # Attend the current query positions over cached and current
         # keys with the fused scaled dot-product implementation.
         # ---------------------------------------------------------
         attention_scores = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
+            q.transpose(1, 2),
+            k.transpose(1, 2),
+            v.transpose(1, 2),
             is_causal=is_causal,
         )
 
@@ -201,5 +199,5 @@ class Attention(nn.Module):
         # Return both the attention result and the updated cache for
         # this layer so the caller can feed the next token directly.
         # ---------------------------------------------------------
-        merged_scores = self._merge_heads(attention_scores)
+        merged_scores = self._merge_heads(attention_scores.transpose(1, 2))
         return self.W_o(merged_scores), (k, v)
