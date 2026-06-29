@@ -25,6 +25,7 @@ from src.shared.device_utils import resolve_precision
 from src.shared.device_utils import resolve_strategy
 from src.shared.device_utils import wait_for_file
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
+from src.shared.training_checkpoint import resolve_resume_shuffle_seed
 from src.shared.training_progress import FullTrainingProgressBar
 from src.shared.validation_generation import ValidationGenerationCallback
 from src.pretraining.training_corpus_cases import PRETRAINING_CORPUS_CASE
@@ -96,6 +97,10 @@ def main() -> None:
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
     min_learning_rate = args.learning_rate * args.min_learning_rate_ratio
+    shuffle_seed = resolve_resume_shuffle_seed(
+        base_seed=SHUFFLE_SEED,
+        checkpoint_path=args.resume_from_checkpoint,
+    )
 
     # ---------------------------------------------------------
     # Stream the single training corpus and build a fixed validation
@@ -111,7 +116,7 @@ def main() -> None:
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
         shuffle_buffer_size=SHUFFLE_BUFFER_SIZE,
-        shuffle_seed=SHUFFLE_SEED,
+        shuffle_seed=shuffle_seed,
         repeat_forever=True,
     )
     validation_source_dataset = PackedCorpusDataset(
@@ -316,7 +321,8 @@ def main() -> None:
         "validation_sample_count": validation_sample_count,
         "packing_version": PACKING_VERSION,
         "shuffle_buffer_size": SHUFFLE_BUFFER_SIZE,
-        "shuffle_seed": SHUFFLE_SEED,
+        "base_shuffle_seed": SHUFFLE_SEED,
+        "shuffle_seed": shuffle_seed,
         "trained_steps": trainer.global_step,
     }
 

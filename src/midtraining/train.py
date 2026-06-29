@@ -30,6 +30,7 @@ from src.shared.pytorch_artifacts import load_model_config
 from src.shared.pytorch_artifacts import load_pytorch_model
 from src.shared.pytorch_artifacts import push_pytorch_model_artifacts
 from src.shared.tokenizer import ByteLevelBPE
+from src.shared.training_checkpoint import resolve_resume_shuffle_seed
 from src.shared.training_progress import FullTrainingProgressBar
 from src.shared.validation_generation import ValidationGenerationCallback
 
@@ -96,6 +97,10 @@ def main() -> None:
         for split_index in range(args.val_split_modulo)
         if split_index != args.val_split_index
     )
+    shuffle_seed = resolve_resume_shuffle_seed(
+        base_seed=SHUFFLE_SEED,
+        checkpoint_path=args.resume_from_checkpoint,
+    )
 
     # ---------------------------------------------------------
     # Stream repeated corpus passes inside persistent workers until
@@ -111,7 +116,7 @@ def main() -> None:
         split_modulo=args.val_split_modulo,
         split_indexes=train_split_indexes,
         shuffle_buffer_size=SHUFFLE_BUFFER_SIZE,
-        shuffle_seed=SHUFFLE_SEED,
+        shuffle_seed=shuffle_seed,
         repeat_forever=True,
     )
     validation_source_dataset = PackedCorpusDataset(
@@ -268,7 +273,8 @@ def main() -> None:
         "validation_sample_count": validation_sample_count,
         "packing_version": PACKING_VERSION,
         "shuffle_buffer_size": SHUFFLE_BUFFER_SIZE,
-        "shuffle_seed": SHUFFLE_SEED,
+        "base_shuffle_seed": SHUFFLE_SEED,
+        "shuffle_seed": shuffle_seed,
         "trained_steps": trainer.global_step,
     }
 
