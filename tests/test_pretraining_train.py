@@ -1,5 +1,4 @@
 import io
-import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
@@ -110,7 +109,7 @@ class PretrainingTrainTest(unittest.TestCase):
     def test_normalize_training_batch_builds_varlen_offsets(self) -> None:
         # ---------------------------------------------------------
         # Convert regular fixed-length batches into flat varlen
-        # inputs so posttraining shares the FlashAttention path.
+        # inputs so posttraining shares the packed SDPA path.
         # ---------------------------------------------------------
         input_tokens = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.long)
         labels = torch.tensor([[2, 3, 0], [5, 6, 0]], dtype=torch.long)
@@ -124,15 +123,9 @@ class PretrainingTrainTest(unittest.TestCase):
 
     def test_transformer_computes_loss_for_packed_batch(self) -> None:
         # ---------------------------------------------------------
-        # Run one packed batch through the CUDA FlashAttention path
-        # using explicit position ids and cu_seqlens.
+        # Run one packed batch through the PyTorch SDPA path using
+        # explicit position ids and cu_seqlens.
         # ---------------------------------------------------------
-        if not torch.cuda.is_available():
-            self.skipTest("FlashAttention varlen loss requires CUDA")
-
-        if importlib.util.find_spec("flash_attn") is None:
-            self.skipTest("flash_attn is not installed")
-
         model = DecoderOnlyTransformer(
             num_tokens=16,
             d_model=8,
@@ -141,11 +134,11 @@ class PretrainingTrainTest(unittest.TestCase):
             num_heads=2,
             d_ff=16,
             pad_token_id=0,
-        ).cuda().to(dtype=torch.bfloat16)
-        input_tokens = torch.tensor([1, 3, 1, 4], dtype=torch.long, device="cuda")
-        labels = torch.tensor([3, 2, 4, 2], dtype=torch.long, device="cuda")
-        position_ids = torch.tensor([0, 1, 0, 1], dtype=torch.long, device="cuda")
-        cu_seqlens = torch.tensor([0, 2, 4], dtype=torch.int32, device="cuda")
+        )
+        input_tokens = torch.tensor([1, 3, 1, 4], dtype=torch.long)
+        labels = torch.tensor([3, 2, 4, 2], dtype=torch.long)
+        position_ids = torch.tensor([0, 1, 0, 1], dtype=torch.long)
+        cu_seqlens = torch.tensor([0, 2, 4], dtype=torch.int32)
         loss = model.compute_chunked_loss(
             input_tokens=input_tokens,
             labels=labels,
@@ -155,6 +148,37 @@ class PretrainingTrainTest(unittest.TestCase):
         )
 
         self.assertTrue(torch.isfinite(loss))
+
+    def test_packed_sdpa_keeps_documents_isolated(self) -> None:
+        # ---------------------------------------------------------
+        # Match a ragged packed batch against the same tokens
+        # represented as padded independent rows.
+        # ---------------------------------------------------------
+        torch.manual_seed(3)
+        model = DecoderOnlyTransformer(
+            num_tokens=16,
+            d_model=8,
+            max_len=4,
+            num_layers=1,
+            num_heads=2,
+            d_ff=16,
+            pad_token_id=0,
+        )
+        packed_tokens = torch.tensor([1, 3, 4, 2], dtype=torch.long)
+        row_tokens = torch.tensor([[1, 3, 4], [2, 0, 0]], dtype=torch.long)
+        position_ids = torch.tensor([0, 1, 2, 0], dtype=torch.long)
+        cu_seqlens = torch.tensor([0, 3, 4], dtype=torch.int32)
+
+        with torch.no_grad():
+            packed_hidden = model.forward_hidden(
+                token_ids=packed_tokens,
+                position_ids=position_ids,
+                cu_seqlens=cu_seqlens,
+                max_seqlen=3,
+            )
+            row_hidden = model.forward_hidden(token_ids=row_tokens)[torch.tensor([0, 1, 2, 3])]
+
+        torch.testing.assert_close(packed_hidden, row_hidden, atol=1e-6, rtol=1e-6)
 
     def test_transformer_rejects_odd_rotary_head_dim(self) -> None:
         # ---------------------------------------------------------
@@ -231,12 +255,6 @@ class PretrainingTrainTest(unittest.TestCase):
         # Verify one-token cached inference uses the same RoPE
         # positions as the full causal forward pass.
         # ---------------------------------------------------------
-        if not torch.cuda.is_available():
-            self.skipTest("FlashAttention full forward requires CUDA")
-
-        if importlib.util.find_spec("flash_attn") is None:
-            self.skipTest("flash_attn is not installed")
-
         torch.manual_seed(7)
         model = DecoderOnlyTransformer(
             num_tokens=16,
@@ -246,9 +264,9 @@ class PretrainingTrainTest(unittest.TestCase):
             num_heads=2,
             d_ff=16,
             pad_token_id=0,
-        ).cuda().to(dtype=torch.bfloat16)
+        )
         model.eval()
-        token_ids = torch.tensor([[1, 3, 4, 2]], dtype=torch.long, device="cuda")
+        token_ids = torch.tensor([[1, 3, 4, 2]], dtype=torch.long)
 
         with torch.no_grad():
             full_logits = model(token_ids)

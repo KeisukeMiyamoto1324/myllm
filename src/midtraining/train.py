@@ -69,8 +69,6 @@ def main() -> None:
     strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
 
-    if accelerator != "cuda":
-        raise RuntimeError("FlashAttention-2 varlen training requires CUDA")
     pad_token_id = tokenizer.token_to_id(tokenizer.pad_token)
     bos_token_id = tokenizer.token_to_id(tokenizer.bos_token)
     eos_token_id = tokenizer.token_to_id(tokenizer.eos_token)
@@ -274,8 +272,8 @@ def main() -> None:
         "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
         "global_effective_batch_size": args.batch_size * args.gradient_accumulation_steps * device_count,
         "ffn_type": "swiglu",
-        "attention_backend": "flash_attention_2_varlen",
-        "requires_cuda": True,
+        "attention_backend": "pytorch_sdpa_varlen",
+        "requires_cuda": False,
         "lr_schedule": "warmup_cosine",
         "lr_warmup_steps": args.lr_warmup_steps,
         "min_learning_rate": min_learning_rate,

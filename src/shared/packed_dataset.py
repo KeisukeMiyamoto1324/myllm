@@ -15,7 +15,7 @@ from src.shared.console import progress_manager
 
 PackedTrainingExample = tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]
 PackedTrainingSegment = tuple[list[int], list[int], int]
-PACKING_VERSION = "bucket-packing-flash-varlen-v1"
+PACKING_VERSION = "bucket-packing-sdpa-varlen-v1"
 SHUFFLE_BUFFER_SIZE = 10000
 SHUFFLE_SEED = 17
 BUCKET_PACKING_BUFFER_SEGMENTS = 4096
@@ -304,7 +304,7 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
     ) -> PackedTrainingExample:
         # ---------------------------------------------------------
         # Return compact packed streams and document offsets so
-        # FlashAttention varlen can avoid dense attention masks.
+        # packed SDPA can avoid dense block-diagonal masks.
         # ---------------------------------------------------------
         cumulative_lengths = torch.tensor(document_lengths, dtype=torch.int32).cumsum(dim=0)
         cu_seqlens = torch.tensor([0, *cumulative_lengths.tolist()], dtype=torch.int32)
@@ -380,7 +380,7 @@ def collate_packed_examples(
 ) -> PackedTrainingExample:
     # ---------------------------------------------------------
     # Flatten variable-length packed samples into one global token
-    # stream and rebuild document offsets for FlashAttention.
+    # stream and rebuild document offsets for packed SDPA.
     # ---------------------------------------------------------
     input_ids = torch.cat([example[0] for example in examples])
     label_ids = torch.cat([example[1] for example in examples])

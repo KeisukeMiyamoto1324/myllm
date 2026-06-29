@@ -66,9 +66,6 @@ def main() -> None:
     strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
 
-    if accelerator != "cuda":
-        raise RuntimeError("FlashAttention-2 varlen training requires CUDA")
-
     # ---------------------------------------------------------
     # Create the output directory and resolve the tokenizer ids
     # needed to stream fixed-length language modeling samples.
@@ -309,8 +306,8 @@ def main() -> None:
         "num_heads": args.num_heads,
         "d_ff": args.d_ff,
         "ffn_type": "swiglu",
-        "attention_backend": "flash_attention_2_varlen",
-        "requires_cuda": True,
+        "attention_backend": "pytorch_sdpa_varlen",
+        "requires_cuda": False,
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,

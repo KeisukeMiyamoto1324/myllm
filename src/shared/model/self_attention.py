@@ -2,13 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-try:
-    from flash_attn import flash_attn_qkvpacked_func
-    from flash_attn import flash_attn_varlen_qkvpacked_func
-except ModuleNotFoundError:
-    flash_attn_qkvpacked_func = None
-    flash_attn_varlen_qkvpacked_func = None
-
 from src.shared.model.kv_cache import LayerKeyValueCache
 
 RotaryPositionCache = tuple[torch.Tensor, torch.Tensor]
@@ -45,7 +38,7 @@ class Attention(nn.Module):
         rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Rotate query or key tensors in the FlashAttention layout:
+        # Rotate query or key tensors in sequence-major layout:
         # sequence dimensions first, then heads, then head features.
         # ---------------------------------------------------------
         cosine, sine = rotary_position_cache
@@ -62,6 +55,72 @@ class Attention(nn.Module):
         )
         return rotated.flatten(start_dim=-2)
 
+    def _run_packed_sdpa(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_seqlen: int,
+    ) -> torch.Tensor:
+        # ---------------------------------------------------------
+        # Use a direct view when every document already has the same
+        # length, avoiding scatter overhead for fixed-size batches.
+        # ---------------------------------------------------------
+        document_lengths = cu_seqlens.diff().to(dtype=torch.long)
+        document_count = int(document_lengths.numel())
+        total_tokens = q.size(dim=0)
+
+        if total_tokens == document_count * max_seqlen:
+            q_padded = q.view(document_count, max_seqlen, self.num_heads, self.head_dim)
+            k_padded = k.view(document_count, max_seqlen, self.num_heads, self.head_dim)
+            v_padded = v.view(document_count, max_seqlen, self.num_heads, self.head_dim)
+            attention_scores = F.scaled_dot_product_attention(
+                q_padded.transpose(1, 2),
+                k_padded.transpose(1, 2),
+                v_padded.transpose(1, 2),
+                is_causal=True,
+            )
+            return attention_scores.transpose(1, 2).contiguous().view(
+                total_tokens,
+                self.num_heads,
+                self.head_dim,
+            )
+
+        # ---------------------------------------------------------
+        # Scatter ragged packed documents into a padded batch so SDPA
+        # can use causal kernels without a dense block-diagonal mask.
+        # ---------------------------------------------------------
+        starts = cu_seqlens[:-1].to(device=q.device, dtype=torch.long)
+        document_ids = torch.repeat_interleave(
+            torch.arange(document_count, device=q.device),
+            document_lengths.to(device=q.device),
+        )
+        token_positions = torch.arange(total_tokens, device=q.device) - torch.repeat_interleave(
+            starts,
+            document_lengths.to(device=q.device),
+        )
+        padded_shape = (document_count, max_seqlen, self.num_heads, self.head_dim)
+        q_padded = q.new_zeros(padded_shape)
+        k_padded = k.new_zeros(padded_shape)
+        v_padded = v.new_zeros(padded_shape)
+        q_padded[document_ids, token_positions] = q
+        k_padded[document_ids, token_positions] = k
+        v_padded[document_ids, token_positions] = v
+
+        # ---------------------------------------------------------
+        # Run PyTorch SDPA on each document independently, then
+        # gather only valid token rows back to the packed layout.
+        # ---------------------------------------------------------
+        attention_scores = F.scaled_dot_product_attention(
+            q_padded.transpose(1, 2),
+            k_padded.transpose(1, 2),
+            v_padded.transpose(1, 2),
+            is_causal=True,
+        )
+        packed_scores = attention_scores.transpose(1, 2).contiguous()
+        return packed_scores[document_ids, token_positions]
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -69,48 +128,43 @@ class Attention(nn.Module):
         cu_seqlens: torch.Tensor,
         max_seqlen: int,
     ) -> torch.Tensor:
-        if flash_attn_varlen_qkvpacked_func is None:
-            raise RuntimeError("flash-attn is required for FlashAttention-2 varlen training")
-
         # ---------------------------------------------------------
-        # Build packed QKV directly in the varlen FlashAttention
-        # layout and rotate only the query and key slices.
+        # Build packed QKV in sequence-major layout and rotate only
+        # the query and key slices before PyTorch SDPA.
         # ---------------------------------------------------------
         qkv = self.W_qkv(hidden_states).view(-1, 3, self.num_heads, self.head_dim)
-        qkv[:, 0] = self._apply_rotary_position(
+        q = self._apply_rotary_position(
             qkv[:, 0],
             rotary_position_cache=rotary_position_cache,
         )
-        qkv[:, 1] = self._apply_rotary_position(
+        k = self._apply_rotary_position(
             qkv[:, 1],
             rotary_position_cache=rotary_position_cache,
         )
+        v = qkv[:, 2]
 
         # ---------------------------------------------------------
-        # Run causal varlen FlashAttention on packed tokens without
-        # creating an explicit attention mask.
+        # Keep packed documents isolated while using PyTorch SDPA's
+        # causal attention implementation for each document.
         # ---------------------------------------------------------
-        attention_scores = flash_attn_varlen_qkvpacked_func(
-            qkv,
-            cu_seqlens,
-            max_seqlen,
-            dropout_p=0.0,
-            causal=True,
+        attention_scores = self._run_packed_sdpa(
+            q=q,
+            k=k,
+            v=v,
+            cu_seqlens=cu_seqlens,
+            max_seqlen=max_seqlen,
         )
         merged_scores = attention_scores.reshape(-1, self.d_model)
         return self.W_o(merged_scores)
 
-    def forward_with_flash_attention(
+    def forward_with_sdpa(
         self,
         hidden_states: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
-        if flash_attn_qkvpacked_func is None:
-            raise RuntimeError("flash-attn is required for FlashAttention-2 inference")
-
         # ---------------------------------------------------------
-        # Build packed QKV in full-sequence FlashAttention layout and
-        # keep RoPE broadcast on the sequence axis, not the head axis.
+        # Build full-sequence QKV in sequence-major layout and keep
+        # RoPE broadcast on the sequence axis, not the head axis.
         # ---------------------------------------------------------
         batch_size, seq_len, _ = hidden_states.size()
         qkv = self.W_qkv(hidden_states).view(
@@ -130,15 +184,20 @@ class Attention(nn.Module):
         )
 
         # ---------------------------------------------------------
-        # Run full-sequence causal FlashAttention and merge the head
+        # Run full-sequence causal PyTorch SDPA and merge the head
         # dimension back into the model width.
         # ---------------------------------------------------------
-        attention_scores = flash_attn_qkvpacked_func(
-            qkv,
-            dropout_p=0.0,
-            causal=True,
+        attention_scores = F.scaled_dot_product_attention(
+            qkv[:, :, 0].transpose(1, 2),
+            qkv[:, :, 1].transpose(1, 2),
+            qkv[:, :, 2].transpose(1, 2),
+            is_causal=True,
         )
-        merged_scores = attention_scores.reshape(batch_size, seq_len, self.d_model)
+        merged_scores = attention_scores.transpose(1, 2).contiguous().view(
+            batch_size,
+            seq_len,
+            self.d_model,
+        )
         return self.W_o(merged_scores)
 
     def forward_with_cache(
@@ -149,8 +208,8 @@ class Attention(nn.Module):
         is_causal: bool = False,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
         # ---------------------------------------------------------
-        # Build packed QKV in the same sequence-major layout used by
-        # FlashAttention, then keep rotated keys in that cache layout.
+        # Build packed QKV in sequence-major layout, then keep
+        # rotated keys in that cache layout.
         # ---------------------------------------------------------
         batch_size, seq_len, _ = hidden_states.size()
         qkv = self.W_qkv(hidden_states).view(
@@ -176,7 +235,7 @@ class Attention(nn.Module):
             v = torch.cat((past_v, current_v), dim=1)
 
         # ---------------------------------------------------------
-        # Keep the cache in FlashAttention layout, then transpose only
+        # Keep the cache in sequence-major layout, then transpose only
         # at the PyTorch attention boundary used for token decoding.
         # ---------------------------------------------------------
         attention_scores = F.scaled_dot_product_attention(

@@ -74,17 +74,17 @@ class DecoderBlock(nn.Module):
         feed_forward_output = self.feed_forward(feed_forward_input)
         return attention_residual + feed_forward_output
 
-    def forward_with_flash_attention(
+    def forward_with_sdpa(
         self,
         x: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Run FlashAttention for full-sequence inference while
-        # training uses the varlen FlashAttention path.
+        # Run PyTorch SDPA for full-sequence inference while
+        # training uses the packed PyTorch SDPA path.
         # ---------------------------------------------------------
         attention_input = self.norm_1(x)
-        attention_output = self.attention.forward_with_flash_attention(
+        attention_output = self.attention.forward_with_sdpa(
             attention_input,
             rotary_position_cache=rotary_position_cache,
         )
@@ -236,7 +236,7 @@ class DecoderOnlyTransformer(L.LightningModule):
             max_seqlen = seq_len
 
         if position_ids is None or cu_seqlens is None or max_seqlen is None:
-            raise ValueError("FlashAttention varlen forward requires position_ids, cu_seqlens, and max_seqlen")
+            raise ValueError("Packed SDPA forward requires position_ids, cu_seqlens, and max_seqlen")
 
         hidden_states = self.we(token_ids)
 
@@ -283,7 +283,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         )
 
         for block in self.blocks:
-            hidden_states = block.forward_with_flash_attention(
+            hidden_states = block.forward_with_sdpa(
                 hidden_states,
                 rotary_position_cache=rotary_position_cache,
             )
