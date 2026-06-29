@@ -89,26 +89,6 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
             streaming=True,
         )
 
-        # ---------------------------------------------------------
-        # Route each streamed document through the deterministic
-        # train-validation split before optional training shuffle.
-        # ---------------------------------------------------------
-        dataset = dataset.filter(
-            lambda sample: self._contains_partition(
-                sample=sample,
-            )
-        )
-
-        # ---------------------------------------------------------
-        # Shuffle each training epoch with a distinct fixed seed,
-        # then shard the same order across ranks and workers.
-        # ---------------------------------------------------------
-        if self.shuffle_buffer_size > 0:
-            dataset = dataset.shuffle(
-                seed=self.shuffle_seed + repeat_index,
-                buffer_size=self.shuffle_buffer_size,
-            )
-
         worker_info = get_worker_info()
         worker_count = 1 if worker_info is None else worker_info.num_workers
         worker_index = 0 if worker_info is None else worker_info.id
@@ -124,6 +104,26 @@ class PackedCorpusDataset(IterableDataset[PackedTrainingExample]):
 
         if shard_count > 1:
             dataset = dataset.shard(num_shards=shard_count, index=shard_index)
+
+        # ---------------------------------------------------------
+        # Route only this rank-worker stream through the deterministic
+        # train-validation split to avoid duplicated remote reads.
+        # ---------------------------------------------------------
+        dataset = dataset.filter(
+            lambda sample: self._contains_partition(
+                sample=sample,
+            )
+        )
+
+        # ---------------------------------------------------------
+        # Shuffle each rank-worker stream with a distinct fixed seed
+        # after sharding so workers do not buffer duplicate samples.
+        # ---------------------------------------------------------
+        if self.shuffle_buffer_size > 0:
+            dataset = dataset.shuffle(
+                seed=self.shuffle_seed + repeat_index,
+                buffer_size=self.shuffle_buffer_size,
+            )
 
         segment_buffer: list[PackedTrainingSegment] = []
         segment_index = 0
