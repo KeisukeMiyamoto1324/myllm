@@ -74,20 +74,19 @@ class DecoderBlock(nn.Module):
         feed_forward_output = self.feed_forward(feed_forward_input)
         return attention_residual + feed_forward_output
 
-    def forward_with_sdpa(
+    def forward_with_flash_attention(
         self,
         x: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Run standard causal attention for full-sequence inference
-        # while training uses the FlashAttention varlen path.
+        # Run FlashAttention for full-sequence inference while
+        # training uses the varlen FlashAttention path.
         # ---------------------------------------------------------
         attention_input = self.norm_1(x)
-        attention_output = self.attention.forward_with_sdpa(
+        attention_output = self.attention.forward_with_flash_attention(
             attention_input,
             rotary_position_cache=rotary_position_cache,
-            is_causal=True,
         )
         attention_residual = x + attention_output
         feed_forward_input = self.norm_2(attention_residual)
@@ -281,7 +280,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         )
 
         for block in self.blocks:
-            hidden_states = block.forward_with_sdpa(
+            hidden_states = block.forward_with_flash_attention(
                 hidden_states,
                 rotary_position_cache=rotary_position_cache,
             )

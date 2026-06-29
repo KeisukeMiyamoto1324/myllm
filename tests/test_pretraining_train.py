@@ -177,6 +177,12 @@ class PretrainingTrainTest(unittest.TestCase):
         # Verify one-token cached inference uses the same RoPE
         # positions as the full causal forward pass.
         # ---------------------------------------------------------
+        if not torch.cuda.is_available():
+            self.skipTest("FlashAttention full forward requires CUDA")
+
+        if importlib.util.find_spec("flash_attn") is None:
+            self.skipTest("flash_attn is not installed")
+
         torch.manual_seed(7)
         model = DecoderOnlyTransformer(
             num_tokens=16,
@@ -186,9 +192,9 @@ class PretrainingTrainTest(unittest.TestCase):
             num_heads=2,
             d_ff=16,
             pad_token_id=0,
-        )
+        ).cuda().to(dtype=torch.bfloat16)
         model.eval()
-        token_ids = torch.tensor([[1, 3, 4, 2]], dtype=torch.long)
+        token_ids = torch.tensor([[1, 3, 4, 2]], dtype=torch.long, device="cuda")
 
         with torch.no_grad():
             full_logits = model(token_ids)

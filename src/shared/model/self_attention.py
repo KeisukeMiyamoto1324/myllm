@@ -3,8 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 try:
+    from flash_attn import flash_attn_qkvpacked_func
     from flash_attn import flash_attn_varlen_qkvpacked_func
 except ModuleNotFoundError:
+    flash_attn_qkvpacked_func = None
     flash_attn_varlen_qkvpacked_func = None
 
 from src.shared.model.kv_cache import LayerKeyValueCache
@@ -112,43 +114,46 @@ class Attention(nn.Module):
         merged_scores = attention_scores.reshape(-1, self.d_model)
         return self.W_o(merged_scores)
 
-    def forward_with_sdpa(
+    def forward_with_flash_attention(
         self,
         hidden_states: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
-        is_causal: bool = False,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Keep a standard batched attention path for non-cached full
-        # sequence inference while training uses FlashAttention.
+        # Use FlashAttention for full-sequence causal inference so
+        # prefill follows the same CUDA backend as varlen training.
         # ---------------------------------------------------------
-        qkv = self.W_qkv(hidden_states).chunk(3, dim=-1)
+        if flash_attn_qkvpacked_func is None:
+            raise RuntimeError("flash-attn is required for FlashAttention-2 inference")
+
+        batch_size, seq_len, _ = hidden_states.size()
+        qkv = self.W_qkv(hidden_states).view(
+            batch_size,
+            seq_len,
+            3,
+            self.num_heads,
+            self.head_dim,
+        )
         q = self._apply_rotary_position(
-            self._split_heads(qkv[0]),
+            qkv[:, :, 0],
             rotary_position_cache=rotary_position_cache,
         )
         k = self._apply_rotary_position(
-            self._split_heads(qkv[1]),
+            qkv[:, :, 1],
             rotary_position_cache=rotary_position_cache,
         )
-        v = self._split_heads(qkv[2])
-
-        # ---------------------------------------------------------
-        # Use PyTorch's fused scaled dot-product attention so large
-        # score and softmax tensors do not need to be materialized.
-        # ---------------------------------------------------------
-        attention_scores = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            is_causal=is_causal,
+        qkv = torch.stack((q, k, qkv[:, :, 2]), dim=2)
+        attention_scores = flash_attn_qkvpacked_func(
+            qkv,
+            dropout_p=0.0,
+            causal=True,
         )
 
         # ---------------------------------------------------------
         # Merge the attended heads and project the result back into
         # the model dimension for the next layer.
         # ---------------------------------------------------------
-        merged_scores = self._merge_heads(attention_scores)
+        merged_scores = attention_scores.reshape(batch_size, seq_len, self.d_model)
         return self.W_o(merged_scores)
 
     def forward_with_cache(
