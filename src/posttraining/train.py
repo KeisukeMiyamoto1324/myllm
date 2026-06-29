@@ -70,6 +70,9 @@ def main() -> None:
     strategy = resolve_strategy(accelerator=accelerator, device_count=device_count)
     precision = resolve_precision(accelerator=accelerator)
 
+    if accelerator != "cuda":
+        raise RuntimeError("FlashAttention-2 varlen training requires CUDA")
+
     # ---------------------------------------------------------
     # Download and load the base tokenizer and model, then build
     # all SFT dataloaders from the shared chat template.
