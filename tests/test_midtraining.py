@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.midtraining.train import parse_args
+from src.midtraining.cli import parse_args
 from src.midtraining.training_corpus_cases import MIDTRAINING_CORPUS_CASE
 
 
@@ -61,6 +61,65 @@ class MidtrainingTest(unittest.TestCase):
             with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
                 with self.assertRaises(SystemExit):
                     parse_args()
+
+    def test_parse_args_rejects_invalid_runtime_values(self) -> None:
+        # ---------------------------------------------------------
+        # Reject values that would otherwise fail later in dataset
+        # packing, DataLoader setup, or chunked loss computation.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir)
+
+            for file_name in ["model.pth", "model_config.json", "tokenizer.json"]:
+                (model_dir / file_name).touch()
+
+            invalid_cases = [
+                ("--max-len", "0"),
+                ("--batch-size", "0"),
+                ("--val-split-modulo", "0"),
+                ("--val-batches", "0"),
+                ("--val-check-interval", "0"),
+                ("--checkpoint-every-n-steps", "0"),
+                ("--metric-log-every-n-steps", "0"),
+                ("--loss-chunk-size", "0"),
+            ]
+
+            for flag, value in invalid_cases:
+                argv = [
+                    "train.py",
+                    "--model-path",
+                    str(model_dir),
+                    flag,
+                    value,
+                ]
+
+                with self.subTest(flag=flag), patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        parse_args()
+
+    def test_parse_args_accepts_longer_context_than_source_model(self) -> None:
+        # ---------------------------------------------------------
+        # Allow midtraining to request longer context than the saved
+        # pretraining config because the model rebuild handles RoPE.
+        # ---------------------------------------------------------
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir)
+
+            for file_name in ["model.pth", "model_config.json", "tokenizer.json"]:
+                (model_dir / file_name).touch()
+
+            argv = [
+                "train.py",
+                "--model-path",
+                str(model_dir),
+                "--max-len",
+                "4096",
+            ]
+
+            with patch("sys.argv", argv):
+                args = parse_args()
+
+        self.assertEqual(args.max_len, 4096)
 
 
 if __name__ == "__main__":

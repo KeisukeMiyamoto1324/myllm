@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import torch
 
-from src.pretraining.train import parse_args
+from src.pretraining.cli import parse_args
 from src.shared.model.position_encoding import RotaryPositionEmbedding
 from src.shared.model.self_attention import Attention
 from src.shared.model.transformer import DecoderOnlyTransformer
@@ -110,7 +110,7 @@ class PretrainingTrainTest(unittest.TestCase):
         self.assertEqual(args.num_layers, 16)
         self.assertEqual(args.num_heads, 12)
         self.assertEqual(args.d_ff, 2048)
-        self.assertEqual(args.batch_size, 96)
+        self.assertEqual(args.batch_size, 16)
         self.assertEqual(args.devices, "auto")
         self.assertEqual(args.output_path, "models/lambda-160m")
 
@@ -140,6 +140,53 @@ class PretrainingTrainTest(unittest.TestCase):
         with patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
             with self.assertRaises(SystemExit):
                 parse_args()
+
+    def test_parse_args_rejects_invalid_runtime_values(self) -> None:
+        # ---------------------------------------------------------
+        # Reject values that would otherwise fail later in dataset
+        # packing, DataLoader setup, or chunked loss computation.
+        # ---------------------------------------------------------
+        invalid_cases = [
+            ("--max-len", "0"),
+            ("--batch-size", "0"),
+            ("--val-split-modulo", "0"),
+            ("--val-batches", "0"),
+            ("--val-check-interval", "0"),
+            ("--checkpoint-every-n-steps", "0"),
+            ("--metric-log-every-n-steps", "0"),
+            ("--loss-chunk-size", "0"),
+        ]
+
+        for flag, value in invalid_cases:
+            argv = [
+                "train.py",
+                flag,
+                value,
+            ]
+
+            with self.subTest(flag=flag), patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parse_args()
+
+    def test_parse_args_rejects_invalid_transformer_shape(self) -> None:
+        # ---------------------------------------------------------
+        # Reject incompatible model dimensions before the attention
+        # and RoPE modules are constructed.
+        # ---------------------------------------------------------
+        invalid_cases = [
+            ["--d-model", "10", "--num-heads", "3"],
+            ["--d-model", "6", "--num-heads", "2"],
+        ]
+
+        for cli_values in invalid_cases:
+            argv = [
+                "train.py",
+                *cli_values,
+            ]
+
+            with self.subTest(cli_values=cli_values), patch("sys.argv", argv), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parse_args()
 
     def test_resolve_warmup_cosine_learning_rate(self) -> None:
         # ---------------------------------------------------------

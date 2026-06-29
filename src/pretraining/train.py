@@ -1,4 +1,3 @@
-import argparse
 from hashlib import blake2b
 import json
 import os
@@ -14,6 +13,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.pretraining.cli import parse_args
 from src.shared.packed_dataset import build_tokenized_cache
 from src.shared.packed_dataset import LocalTokenizedDataset
 from src.shared.packed_dataset import PackedCorpusDataset
@@ -38,173 +38,6 @@ load_dotenv()
 
 
 PACKING_VERSION = "bucket-packing-v1"
-
-
-def parse_args() -> argparse.Namespace:
-    # ---------------------------------------------------------
-    # Define command line arguments used to configure the full
-    # training run. Each value has the following responsibility.
-    #
-    # --max-len:
-    # Maximum token length of one training sample. A larger value
-    # lets the model see longer context, but increases memory use.
-    #
-    # --d-model:
-    # Hidden dimension size of the Transformer. This controls the
-    # width of token representations across the whole network.
-    #
-    # --num-layers:
-    # Number of stacked Transformer blocks. A larger value makes
-    # the network deeper and usually increases expressiveness.
-    #
-    # --num-heads:
-    # Number of attention heads used in each block. This decides
-    # how many parallel attention patterns are learned at once.
-    #
-    # --d-ff:
-    # Hidden size of the feed-forward sublayer inside each block.
-    # This is the expansion dimension used after attention.
-    #
-    # --learning-rate:
-    # Maximum optimizer step size after warmup. Larger values update
-    # weights faster, while smaller values tend to be more stable.
-    #
-    # --lr-warmup-steps:
-    # Number of optimizer steps used to linearly increase the
-    # learning rate from zero to --learning-rate.
-    #
-    # --min-learning-rate-ratio:
-    # Final cosine-decay learning rate as a ratio of --learning-rate.
-    # A positive floor keeps small updates active near train end.
-    #
-    # --batch-size:
-    # Number of samples processed in one forward and backward pass.
-    # Larger batches improve throughput but require more device memory.
-    #
-    # --gradient-accumulation-steps:
-    # Number of batches accumulated before one optimizer step. This
-    # increases the effective batch size without increasing peak memory.
-    #
-    # --max-steps:
-    # Total number of optimizer steps before training stops. This
-    # is the main budget that limits the full training duration.
-    #
-    # --num-workers:
-    # Number of DataLoader worker processes used to prepare data.
-    # Increasing this can improve input throughput on CPU-heavy IO.
-    #
-    # --val-split-modulo:
-    # Modulo base for deterministic dataset splitting. Samples are
-    # partitioned by index remainder into train and validation sets.
-    #
-    # --val-split-index:
-    # Remainder value reserved for validation samples. With modulo
-    # 100 and index 0, roughly 1 percent of samples become validation.
-    #
-    # --val-batches:
-    # Number of validation batches evaluated at each validation run.
-    # This caps validation cost so streamed training stays bounded.
-    #
-    # --validation-cache-path:
-    # Optional file path for fixed tokenized validation samples.
-    # Empty value stores a cache under the output directory.
-    #
-    # --val-check-interval:
-    # Training step interval used to trigger validation. Smaller
-    # values monitor quality more often, with extra compute cost.
-    #
-    # --checkpoint-every-n-steps:
-    # Step interval for saving periodic checkpoints. These files
-    # allow training to resume or preserve intermediate states.
-    #
-    # --metric-log-every-n-steps:
-    # Step interval for writing logged metrics to CSV. Larger values
-    # reduce disk writes and keep training throughput stable.
-    #
-    # --loss-chunk-size:
-    # Number of sequence positions projected to vocabulary logits at
-    # once when computing loss for large vocabulary training.
-    #
-    # --tokenizer-path:
-    # Directory path to the tokenizer artifact. This tokenizer
-    # defines the vocabulary and special token ids used in training.
-    #
-    # --output-path:
-    # Directory path used to save the trained model weights,
-    # model configuration, and Lightning checkpoints.
-    #
-    # --resume-from-checkpoint:
-    # Lightning checkpoint path used to resume interrupted training
-    # with optimizer state, callback state, and global step.
-    #
-    # --continue-from-model:
-    # Trained model.pth path used to initialize weights for a new
-    # training run without restoring optimizer state.
-    # ---------------------------------------------------------
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--max-len", type=int, default=1024)
-    parser.add_argument("--d-model", type=int, default=768)
-    parser.add_argument("--num-layers", type=int, default=16)
-    parser.add_argument("--num-heads", type=int, default=12)
-    parser.add_argument("--d-ff", type=int, default=2048)
-    parser.add_argument("--learning-rate", type=float, default=2e-4)
-    parser.add_argument("--lr-warmup-steps", type=int, default=2000)
-    parser.add_argument("--min-learning-rate-ratio", type=float, default=0.2)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
-    parser.add_argument("--max-steps", type=int, default=20480)
-    parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--val-split-modulo", type=int, default=100)
-    parser.add_argument("--val-split-index", type=int, default=0)
-    parser.add_argument("--val-batches", type=int, default=64)
-    parser.add_argument("--validation-cache-path", type=str, default="")
-    parser.add_argument("--val-check-interval", type=int, default=1000)
-    parser.add_argument("--checkpoint-every-n-steps", type=int, default=2000)
-    parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
-    parser.add_argument("--loss-chunk-size", type=int, default=32)
-    parser.add_argument("--devices", type=str, default="auto")
-    parser.add_argument("--tokenizer-path", type=str, default="models/tokenizer")
-    parser.add_argument("--output-path", type=str, default="models/lambda-160m")
-    parser.add_argument("--push-to-hub", action="store_true")
-
-    resume_group = parser.add_mutually_exclusive_group()
-    resume_group.add_argument("--resume-from-checkpoint", type=str, default="")
-    resume_group.add_argument("--continue-from-model", type=str, default="")
-
-    args = parser.parse_args()
-
-    # ---------------------------------------------------------
-    # Reject invalid LR schedule settings before any model or
-    # streaming dataset state is initialized.
-    # ---------------------------------------------------------
-    if args.lr_warmup_steps < 0 or args.lr_warmup_steps >= args.max_steps:
-        parser.error("--lr-warmup-steps must be greater than or equal to 0 and less than --max-steps")
-
-    if args.min_learning_rate_ratio < 0.0 or args.min_learning_rate_ratio > 1.0:
-        parser.error("--min-learning-rate-ratio must be between 0.0 and 1.0")
-
-    if args.gradient_accumulation_steps < 1:
-        parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
-
-    try:
-        resolve_devices(devices=args.devices)
-    except ValueError as error:
-        parser.error(str(error))
-
-    # ---------------------------------------------------------
-    # Reject missing resume inputs before streaming datasets or
-    # model artifacts are opened for the training run.
-    # ---------------------------------------------------------
-    if args.resume_from_checkpoint and not Path(args.resume_from_checkpoint).is_file():
-        parser.error("--resume-from-checkpoint must point to an existing checkpoint file")
-
-    if args.continue_from_model and not Path(args.continue_from_model).is_file():
-        parser.error("--continue-from-model must point to an existing model state file")
-
-    if args.push_to_hub and not os.environ.get("HF_REPO"):
-        parser.error("HF_REPO is required in the environment when --push-to-hub is set")
-
-    return args
 
 
 def build_corpus_signature(

@@ -1,4 +1,3 @@
-import argparse
 from hashlib import blake2b
 import json
 import os
@@ -15,6 +14,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from src.midtraining.cli import parse_args
 from src.midtraining.training_corpus_cases import MIDTRAINING_CORPUS_CASE
 from src.midtraining.training_corpus_cases import serialize_midtraining_corpus_case
 from src.shared.device_utils import is_global_zero_process
@@ -61,82 +61,6 @@ class DatasetEpochCallback(Callback):
         # ---------------------------------------------------------
         del pl_module
         self.dataset.set_epoch(epoch_index=trainer.current_epoch)
-
-
-def parse_args() -> argparse.Namespace:
-    # ---------------------------------------------------------
-    # Define the input model, training runtime, validation budget,
-    # output artifacts, and optional epoch-checkpoint resume.
-    # ---------------------------------------------------------
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", type=str, required=True)
-    parser.add_argument("--max-len", type=int, default=None)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--batch-size", type=int, default=72)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=2)
-    parser.add_argument("--max-steps", type=int, default=10240)
-    parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--val-split-modulo", type=int, default=100)
-    parser.add_argument("--val-split-index", type=int, default=0)
-    parser.add_argument("--val-batches", type=int, default=64)
-    parser.add_argument("--validation-cache-path", type=str, default="")
-    parser.add_argument("--val-check-interval", type=int, default=1000)
-    parser.add_argument("--checkpoint-every-n-steps", type=int, default=5000)
-    parser.add_argument("--metric-log-every-n-steps", type=int, default=500)
-    parser.add_argument("--loss-chunk-size", type=int, default=32)
-    parser.add_argument("--devices", type=str, default="auto")
-    parser.add_argument("--output-path", type=str, default="models/lambda-160m-midtrained")
-    parser.add_argument("--resume-from-checkpoint", type=str, default="")
-    parser.add_argument("--push-to-hub", action="store_true")
-    args = parser.parse_args()
-
-    # ---------------------------------------------------------
-    # Reject incomplete model directories and invalid runtime
-    # values before opening the remote streaming dataset.
-    # ---------------------------------------------------------
-    model_path = Path(args.model_path)
-    required_model_files = [
-        model_path / "model.pth",
-        model_path / "model_config.json",
-        model_path / "tokenizer.json",
-    ]
-
-    if not model_path.is_dir() or any(not path.is_file() for path in required_model_files):
-        parser.error("--model-path must contain model.pth, model_config.json, and tokenizer.json")
-
-    if args.max_len is not None and args.max_len <= 0:
-        parser.error("--max-len must be greater than 0")
-
-    if args.learning_rate <= 0.0:
-        parser.error("--learning-rate must be greater than 0")
-
-    if args.gradient_accumulation_steps < 1:
-        parser.error("--gradient-accumulation-steps must be greater than or equal to 1")
-
-    try:
-        resolve_devices(devices=args.devices)
-    except ValueError as error:
-        parser.error(str(error))
-
-    if args.max_steps <= 0:
-        parser.error("--max-steps must be greater than 0")
-
-    if args.checkpoint_every_n_steps <= 0:
-        parser.error("--checkpoint-every-n-steps must be greater than 0")
-
-    if args.val_split_modulo <= 1:
-        parser.error("--val-split-modulo must be greater than 1")
-
-    if args.val_split_index < 0 or args.val_split_index >= args.val_split_modulo:
-        parser.error("--val-split-index must be within --val-split-modulo")
-
-    if args.resume_from_checkpoint and not Path(args.resume_from_checkpoint).is_file():
-        parser.error("--resume-from-checkpoint must point to an existing checkpoint file")
-
-    if args.push_to_hub and not os.environ.get("HF_REPO"):
-        parser.error("HF_REPO is required in the environment when --push-to-hub is set")
-
-    return args
 
 
 def build_corpus_signature() -> str:
