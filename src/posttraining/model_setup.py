@@ -54,7 +54,7 @@ def build_model_config(
         "d_model": model.we.embedding_dim,
         "num_layers": len(model.blocks),
         "num_heads": first_block.attention.num_heads,
-        "d_ff": first_block.feed_forward.linear_1.out_features,
+        "d_ff": first_block.feed_forward.gate_proj.out_features,
         "learning_rate": learning_rate,
         "pad_token_id": pad_token_id,
         "bos_token_id": bos_token_id,

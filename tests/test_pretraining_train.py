@@ -16,7 +16,7 @@ class PretrainingTrainTest(unittest.TestCase):
     def test_parse_args_uses_160m_model_defaults(self) -> None:
         # ---------------------------------------------------------
         # Keep the default pretraining run near the 160M class while
-        # following the OpenCALM small width and FFN structure.
+        # using the reduced SwiGLU width for parameter parity.
         # ---------------------------------------------------------
         with patch("sys.argv", ["train.py"]):
             args = parse_args()
@@ -25,7 +25,7 @@ class PretrainingTrainTest(unittest.TestCase):
         self.assertEqual(args.d_model, 768)
         self.assertEqual(args.num_layers, 16)
         self.assertEqual(args.num_heads, 12)
-        self.assertEqual(args.d_ff, 3072)
+        self.assertEqual(args.d_ff, 2048)
         self.assertEqual(args.batch_size, 96)
         self.assertEqual(args.devices, "auto")
         self.assertEqual(args.output_path, "models/lambda-160m")
