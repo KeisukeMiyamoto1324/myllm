@@ -57,7 +57,7 @@ def build_model_config(
         "num_heads": first_block.attention.num_heads,
         "d_ff": first_block.feed_forward.up_projection.out_features,
         "ffn_type": "swiglu",
-        "attention_backend": "pytorch_sdpa_varlen",
+        "attention_backend": "pytorch_sdpa_masked",
         "requires_cuda": False,
         "learning_rate": learning_rate,
         "pad_token_id": pad_token_id,

@@ -306,7 +306,7 @@ def main() -> None:
         "num_heads": args.num_heads,
         "d_ff": args.d_ff,
         "ffn_type": "swiglu",
-        "attention_backend": "pytorch_sdpa_varlen",
+        "attention_backend": "pytorch_sdpa_masked",
         "requires_cuda": False,
         "learning_rate": args.learning_rate,
         "batch_size": args.batch_size,

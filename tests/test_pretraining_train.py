@@ -7,6 +7,7 @@ from unittest.mock import patch
 import torch
 
 from src.pretraining.train import parse_args
+from src.shared.model.transformer import build_packed_attention_mask
 from src.shared.model.transformer import DecoderOnlyTransformer
 from src.shared.model.transformer import normalize_training_batch
 from src.shared.model.transformer import resolve_warmup_cosine_learning_rate
@@ -106,25 +107,24 @@ class PretrainingTrainTest(unittest.TestCase):
             min_learning_rate,
         )
 
-    def test_normalize_training_batch_builds_varlen_offsets(self) -> None:
+    def test_normalize_training_batch_keeps_regular_batch(self) -> None:
         # ---------------------------------------------------------
-        # Convert regular fixed-length batches into flat varlen
-        # inputs so posttraining shares the packed SDPA path.
+        # Keep regular fixed-length batches in batch-major layout so
+        # posttraining uses the simple causal PyTorch SDPA path.
         # ---------------------------------------------------------
         input_tokens = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.long)
         labels = torch.tensor([[2, 3, 0], [5, 6, 0]], dtype=torch.long)
         normalized = normalize_training_batch(batch=(input_tokens, labels))
 
-        self.assertEqual(normalized[0].tolist(), [1, 2, 3, 4, 5, 6])
-        self.assertEqual(normalized[1].tolist(), [2, 3, 0, 5, 6, 0])
-        self.assertEqual(normalized[2].tolist(), [0, 1, 2, 0, 1, 2])
-        self.assertEqual(normalized[3].tolist(), [0, 3, 6])
-        self.assertEqual(normalized[4], 3)
+        self.assertEqual(normalized[0].tolist(), [[1, 2, 3], [4, 5, 6]])
+        self.assertEqual(normalized[1].tolist(), [[2, 3, 0], [5, 6, 0]])
+        self.assertIsNone(normalized[2])
+        self.assertIsNone(normalized[3])
 
     def test_transformer_computes_loss_for_packed_batch(self) -> None:
         # ---------------------------------------------------------
         # Run one packed batch through the PyTorch SDPA path using
-        # explicit position ids and cu_seqlens.
+        # explicit position ids and segment ids.
         # ---------------------------------------------------------
         model = DecoderOnlyTransformer(
             num_tokens=16,
@@ -135,16 +135,15 @@ class PretrainingTrainTest(unittest.TestCase):
             d_ff=16,
             pad_token_id=0,
         )
-        input_tokens = torch.tensor([1, 3, 1, 4], dtype=torch.long)
-        labels = torch.tensor([3, 2, 4, 2], dtype=torch.long)
-        position_ids = torch.tensor([0, 1, 0, 1], dtype=torch.long)
-        cu_seqlens = torch.tensor([0, 2, 4], dtype=torch.int32)
+        input_tokens = torch.tensor([[1, 3, 1, 4]], dtype=torch.long)
+        labels = torch.tensor([[3, 2, 4, 2]], dtype=torch.long)
+        position_ids = torch.tensor([[0, 1, 0, 1]], dtype=torch.long)
+        segment_ids = torch.tensor([[0, 0, 1, 1]], dtype=torch.long)
         loss = model.compute_chunked_loss(
             input_tokens=input_tokens,
             labels=labels,
             position_ids=position_ids,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=2,
+            segment_ids=segment_ids,
         )
 
         self.assertTrue(torch.isfinite(loss))
@@ -164,21 +163,27 @@ class PretrainingTrainTest(unittest.TestCase):
             d_ff=16,
             pad_token_id=0,
         )
-        packed_tokens = torch.tensor([1, 3, 4, 2], dtype=torch.long)
+        packed_tokens = torch.tensor([[1, 3, 4, 2, 0, 0]], dtype=torch.long)
         row_tokens = torch.tensor([[1, 3, 4], [2, 0, 0]], dtype=torch.long)
-        position_ids = torch.tensor([0, 1, 2, 0], dtype=torch.long)
-        cu_seqlens = torch.tensor([0, 3, 4], dtype=torch.int32)
+        position_ids = torch.tensor([[0, 1, 2, 0, 0, 0]], dtype=torch.long)
+        segment_ids = torch.tensor([[0, 0, 0, 1, -1, -1]], dtype=torch.long)
 
         with torch.no_grad():
             packed_hidden = model.forward_hidden(
                 token_ids=packed_tokens,
                 position_ids=position_ids,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=3,
+                attention_mask=None,
             )
-            row_hidden = model.forward_hidden(token_ids=row_tokens)[torch.tensor([0, 1, 2, 3])]
+            masked_hidden = model.forward_hidden(
+                token_ids=packed_tokens,
+                position_ids=position_ids,
+                attention_mask=build_packed_attention_mask(segment_ids),
+            )
+            row_hidden = model.forward_hidden(token_ids=row_tokens)
 
-        torch.testing.assert_close(packed_hidden, row_hidden, atol=1e-6, rtol=1e-6)
+        self.assertFalse(torch.allclose(packed_hidden[:, 3], masked_hidden[:, 3]))
+        torch.testing.assert_close(masked_hidden[:, :3], row_hidden[:1], atol=1e-6, rtol=1e-6)
+        torch.testing.assert_close(masked_hidden[:, 3], row_hidden[1, 0].unsqueeze(0), atol=1e-6, rtol=1e-6)
 
     def test_transformer_rejects_odd_rotary_head_dim(self) -> None:
         # ---------------------------------------------------------

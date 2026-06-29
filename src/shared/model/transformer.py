@@ -50,8 +50,7 @@ class DecoderBlock(nn.Module):
         self,
         x: torch.Tensor,
         rotary_position_cache: RotaryPositionCache,
-        cu_seqlens: torch.Tensor,
-        max_seqlen: int,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
         # Apply pre-norm self-attention so multiple decoder blocks can
@@ -61,8 +60,8 @@ class DecoderBlock(nn.Module):
         attention_output = self.attention(
             attention_input,
             rotary_position_cache=rotary_position_cache,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
+            is_causal=attention_mask is None,
+            attention_mask=attention_mask,
         )
         attention_residual = x + attention_output
 
@@ -210,35 +209,23 @@ class DecoderOnlyTransformer(L.LightningModule):
         self,
         token_ids: torch.Tensor,
         position_ids: torch.Tensor | None = None,
-        cu_seqlens: torch.Tensor | None = None,
-        max_seqlen: int | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
         # Convert token ids into hidden states and create contiguous
         # positions when packed batches do not supply explicit ids.
         # ---------------------------------------------------------
-        if token_ids.dim() == 2:
-            batch_size, seq_len = token_ids.size()
-            token_ids = token_ids.reshape(-1)
+        hidden_states = self.we(token_ids)
+
+        if position_ids is None:
+            seq_len = token_ids.size(dim=1)
             position_ids = torch.arange(
                 start=0,
                 end=seq_len,
                 dtype=torch.long,
                 device=token_ids.device,
-            ).repeat(batch_size)
-            cu_seqlens = torch.arange(
-                start=0,
-                end=(batch_size + 1) * seq_len,
-                step=seq_len,
-                dtype=torch.int32,
-                device=token_ids.device,
-            )
-            max_seqlen = seq_len
-
-        if position_ids is None or cu_seqlens is None or max_seqlen is None:
-            raise ValueError("Packed SDPA forward requires position_ids, cu_seqlens, and max_seqlen")
-
-        hidden_states = self.we(token_ids)
+            ).unsqueeze(0)
+            position_ids = position_ids.expand(token_ids.size(dim=0), seq_len)
 
         rotary_position_cache = self.build_rotary_position_cache(
             position_ids=position_ids,
@@ -253,8 +240,7 @@ class DecoderOnlyTransformer(L.LightningModule):
             hidden_states = block(
                 hidden_states,
                 rotary_position_cache=rotary_position_cache,
-                cu_seqlens=cu_seqlens,
-                max_seqlen=max_seqlen,
+                attention_mask=attention_mask,
             )
 
         # ---------------------------------------------------------
@@ -383,21 +369,25 @@ class DecoderOnlyTransformer(L.LightningModule):
         input_tokens: torch.Tensor,
         labels: torch.Tensor,
         position_ids: torch.Tensor | None = None,
-        cu_seqlens: torch.Tensor | None = None,
-        max_seqlen: int | None = None,
+        segment_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
         # Run the Transformer stack once, then split only the large
         # vocabulary projection and cross-entropy over token positions.
         # ---------------------------------------------------------
+        attention_mask = None
+
+        if segment_ids is not None:
+            attention_mask = build_packed_attention_mask(segment_ids=segment_ids)
+
         hidden_states = self.forward_hidden(
             token_ids=input_tokens,
             position_ids=position_ids,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
+            attention_mask=attention_mask,
         )
-        labels = labels.reshape(-1)
-        token_count = hidden_states.size(dim=0)
+        flat_labels = labels.reshape(-1)
+        flat_hidden_states = hidden_states.reshape(-1, hidden_states.size(dim=-1))
+        token_count = flat_hidden_states.size(dim=0)
         chunk_starts = range(0, token_count, self.loss_chunk_size)
 
         # ---------------------------------------------------------
@@ -407,9 +397,9 @@ class DecoderOnlyTransformer(L.LightningModule):
         loss_chunks = [
             self.loss(
                 self.fc_layer(
-                    hidden_states[chunk_start : chunk_start + self.loss_chunk_size, :]
+                    flat_hidden_states[chunk_start : chunk_start + self.loss_chunk_size, :]
                 ),
-                labels[chunk_start : chunk_start + self.loss_chunk_size],
+                flat_labels[chunk_start : chunk_start + self.loss_chunk_size],
             )
             for chunk_start in chunk_starts
         ]
@@ -423,13 +413,12 @@ class DecoderOnlyTransformer(L.LightningModule):
         # against the shifted labels.
         # ---------------------------------------------------------
         del batch_idx
-        input_tokens, labels, position_ids, cu_seqlens, max_seqlen = normalize_training_batch(batch=batch)
+        input_tokens, labels, position_ids, segment_ids = normalize_training_batch(batch=batch)
         loss = self.compute_chunked_loss(
             input_tokens=input_tokens,
             labels=labels,
             position_ids=position_ids,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
+            segment_ids=segment_ids,
         )
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
         return loss
@@ -440,13 +429,12 @@ class DecoderOnlyTransformer(L.LightningModule):
         # checkpoints can monitor held-out next-token accuracy.
         # ---------------------------------------------------------
         del batch_idx
-        input_tokens, labels, position_ids, cu_seqlens, max_seqlen = normalize_training_batch(batch=batch)
+        input_tokens, labels, position_ids, segment_ids = normalize_training_batch(batch=batch)
         loss = self.compute_chunked_loss(
             input_tokens=input_tokens,
             labels=labels,
             position_ids=position_ids,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
+            segment_ids=segment_ids,
         )
         self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         return loss
@@ -454,31 +442,41 @@ class DecoderOnlyTransformer(L.LightningModule):
 
 def normalize_training_batch(
     batch: tuple[torch.Tensor, ...],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
     # ---------------------------------------------------------
     # Support packed pretraining batches while keeping existing
     # posttraining batches on the two-tensor path.
     # ---------------------------------------------------------
     if len(batch) == 2:
         input_tokens, labels = batch
-        batch_size, seq_len = input_tokens.size()
-        position_ids = torch.arange(
-            start=0,
-            end=seq_len,
-            dtype=torch.long,
-            device=input_tokens.device,
-        ).repeat(batch_size)
-        cu_seqlens = torch.arange(
-            start=0,
-            end=(batch_size + 1) * seq_len,
-            step=seq_len,
-            dtype=torch.int32,
-            device=input_tokens.device,
-        )
-        return input_tokens.reshape(-1), labels.reshape(-1), position_ids, cu_seqlens, seq_len
+        return input_tokens, labels, None, None
 
-    input_tokens, labels, position_ids, cu_seqlens, max_seqlen = batch
-    return input_tokens, labels, position_ids, cu_seqlens, int(max_seqlen)
+    input_tokens, labels, position_ids, segment_ids = batch
+    return input_tokens, labels, position_ids, segment_ids
+
+
+def build_packed_attention_mask(segment_ids: torch.Tensor) -> torch.Tensor:
+    # ---------------------------------------------------------
+    # Allow each token to attend only to earlier tokens from the
+    # same packed segment while keeping padding labels ignored.
+    # ---------------------------------------------------------
+    batch_size, seq_len = segment_ids.size()
+    causal_mask = torch.ones(
+        seq_len,
+        seq_len,
+        dtype=torch.bool,
+        device=segment_ids.device,
+    ).tril()
+    valid_tokens = segment_ids.ge(0)
+    same_segment_mask = segment_ids.unsqueeze(2).eq(segment_ids.unsqueeze(1))
+    packed_mask = same_segment_mask & causal_mask.unsqueeze(0) & valid_tokens.unsqueeze(1)
+    padding_query_mask = causal_mask.unsqueeze(0) & valid_tokens.unsqueeze(1)
+    attention_mask = torch.where(
+        valid_tokens.view(batch_size, seq_len, 1),
+        packed_mask,
+        padding_query_mask,
+    )
+    return attention_mask.unsqueeze(1)
 
 
 def resolve_warmup_cosine_learning_rate(
