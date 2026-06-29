@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
 
 from src.shared.model.kv_cache import KeyValueCache, LayerKeyValueCache
-from src.shared.model.self_attention import Attention
+from src.shared.model.self_attention import Attention, RotaryPositionCache
 
 
 class FeedForward(nn.Module):
@@ -49,7 +49,7 @@ class DecoderBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        position_ids: torch.Tensor,
+        rotary_position_cache: RotaryPositionCache,
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
@@ -59,7 +59,7 @@ class DecoderBlock(nn.Module):
         attention_input = self.norm_1(x)
         attention_output = self.attention(
             attention_input,
-            position_ids=position_ids,
+            rotary_position_cache=rotary_position_cache,
             is_causal=attention_mask is None,
             attention_mask=attention_mask,
         )
@@ -76,7 +76,7 @@ class DecoderBlock(nn.Module):
     def forward_with_cache(
         self,
         x: torch.Tensor,
-        position_ids: torch.Tensor,
+        rotary_position_cache: RotaryPositionCache,
         past_key_value: LayerKeyValueCache | None,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
         # ---------------------------------------------------------
@@ -86,7 +86,7 @@ class DecoderBlock(nn.Module):
         attention_input = self.norm_1(x)
         attention_output, key_value_cache = self.attention.forward_with_cache(
             attention_input,
-            position_ids=position_ids,
+            rotary_position_cache=rotary_position_cache,
             past_key_value=past_key_value,
             is_causal=past_key_value is None,
         )
@@ -125,6 +125,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         # blocks that apply position information inside Q/K space.
         # ---------------------------------------------------------
         self.max_len = max_len
+        self.head_dim = d_model // num_heads
         self.we = nn.Embedding(num_embeddings=num_tokens, embedding_dim=d_model)
         self.blocks = nn.ModuleList(
             [DecoderBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff) for _ in range(num_layers)]
@@ -162,6 +163,26 @@ class DecoderOnlyTransformer(L.LightningModule):
         # ---------------------------------------------------------
         self.loss = nn.CrossEntropyLoss(ignore_index=pad_token_id, reduction="sum")
 
+    def build_rotary_position_cache(
+        self,
+        position_ids: torch.Tensor,
+        dtype: torch.dtype,
+    ) -> RotaryPositionCache:
+        # ---------------------------------------------------------
+        # Build RoPE sin/cos values once per forward pass so every
+        # decoder layer and both Q/K rotations can reuse them.
+        # ---------------------------------------------------------
+        rotary_indexes = torch.arange(
+            start=0,
+            end=self.head_dim,
+            step=2,
+            dtype=torch.float,
+            device=position_ids.device,
+        )
+        rotary_frequencies = 1.0 / (10000.0 ** (rotary_indexes / self.head_dim))
+        angles = position_ids.float()[:, None, :, None] * rotary_frequencies[None, None, None, :]
+        return torch.cos(angles).to(dtype=dtype), torch.sin(angles).to(dtype=dtype)
+
     def forward_hidden(
         self,
         token_ids: torch.Tensor,
@@ -184,6 +205,11 @@ class DecoderOnlyTransformer(L.LightningModule):
             ).unsqueeze(0)
             position_ids = position_ids.expand(token_ids.size(dim=0), seq_len)
 
+        rotary_position_cache = self.build_rotary_position_cache(
+            position_ids=position_ids,
+            dtype=hidden_states.dtype,
+        )
+
         # ---------------------------------------------------------
         # Reuse the same decoder block interface for every layer to
         # make the model depth configurable.
@@ -191,7 +217,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         for block in self.blocks:
             hidden_states = block(
                 hidden_states,
-                position_ids=position_ids,
+                rotary_position_cache=rotary_position_cache,
                 attention_mask=attention_mask,
             )
 
@@ -232,6 +258,10 @@ class DecoderOnlyTransformer(L.LightningModule):
             device=token_ids.device,
         ).unsqueeze(0)
         position_ids = position_ids.expand(token_ids.size(dim=0), seq_len)
+        rotary_position_cache = self.build_rotary_position_cache(
+            position_ids=position_ids,
+            dtype=hidden_states.dtype,
+        )
         next_key_values: KeyValueCache = []
 
         # ---------------------------------------------------------
@@ -242,7 +272,7 @@ class DecoderOnlyTransformer(L.LightningModule):
             past_key_value = None if past_key_values is None else past_key_values[layer_index]
             hidden_states, key_value_cache = block.forward_with_cache(
                 hidden_states,
-                position_ids,
+                rotary_position_cache,
                 past_key_value,
             )
             next_key_values.append(key_value_cache)

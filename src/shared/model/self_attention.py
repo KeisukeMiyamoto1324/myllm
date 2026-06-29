@@ -4,6 +4,8 @@ import torch.nn.functional as F
 
 from src.shared.model.kv_cache import LayerKeyValueCache
 
+RotaryPositionCache = tuple[torch.Tensor, torch.Tensor]
+
 
 class Attention(nn.Module):
     def __init__(self, d_model: int = 2, num_heads: int = 1) -> None:
@@ -56,20 +58,15 @@ class Attention(nn.Module):
     def _apply_rotary_position(
         self,
         x: torch.Tensor,
-        position_ids: torch.Tensor,
+        rotary_position_cache: RotaryPositionCache,
     ) -> torch.Tensor:
         # ---------------------------------------------------------
-        # Rotate each query/key pair with token positions while
+        # Rotate each query/key pair with the shared RoPE cache while
         # keeping values unchanged for scaled dot-product attention.
         # ---------------------------------------------------------
-        angles = position_ids.to(device=x.device).float()[:, None, :, None] * self.rotary_frequencies[
-            None,
-            None,
-            None,
-            :,
-        ]
-        cosine = torch.cos(angles).to(dtype=x.dtype)
-        sine = torch.sin(angles).to(dtype=x.dtype)
+        cosine, sine = rotary_position_cache
+        cosine = cosine.to(device=x.device, dtype=x.dtype)
+        sine = sine.to(device=x.device, dtype=x.dtype)
         even_values = x[..., 0::2]
         odd_values = x[..., 1::2]
         rotated = torch.stack(
@@ -84,7 +81,7 @@ class Attention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        position_ids: torch.Tensor,
+        rotary_position_cache: RotaryPositionCache,
         is_causal: bool = False,
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
@@ -94,11 +91,11 @@ class Attention(nn.Module):
         # ---------------------------------------------------------
         q = self._apply_rotary_position(
             self._split_heads(self.W_q(hidden_states)),
-            position_ids=position_ids,
+            rotary_position_cache=rotary_position_cache,
         )
         k = self._apply_rotary_position(
             self._split_heads(self.W_k(hidden_states)),
-            position_ids=position_ids,
+            rotary_position_cache=rotary_position_cache,
         )
         v = self._split_heads(self.W_v(hidden_states))
 
@@ -124,7 +121,7 @@ class Attention(nn.Module):
     def forward_with_cache(
         self,
         hidden_states: torch.Tensor,
-        position_ids: torch.Tensor,
+        rotary_position_cache: RotaryPositionCache,
         past_key_value: LayerKeyValueCache | None,
         is_causal: bool = False,
     ) -> tuple[torch.Tensor, LayerKeyValueCache]:
@@ -134,11 +131,11 @@ class Attention(nn.Module):
         # ---------------------------------------------------------
         q = self._apply_rotary_position(
             self._split_heads(self.W_q(hidden_states)),
-            position_ids=position_ids,
+            rotary_position_cache=rotary_position_cache,
         )
         current_k = self._apply_rotary_position(
             self._split_heads(self.W_k(hidden_states)),
-            position_ids=position_ids,
+            rotary_position_cache=rotary_position_cache,
         )
         current_v = self._split_heads(self.W_v(hidden_states))
 
