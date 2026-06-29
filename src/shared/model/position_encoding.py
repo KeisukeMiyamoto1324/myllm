@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class RotaryPositionEmbedding(nn.Module):
-    def __init__(self, head_dim: int) -> None:
+    def __init__(self, head_dim: int, max_len: int = 4096) -> None:
         super().__init__()
 
         # ---------------------------------------------------------
@@ -14,39 +14,15 @@ class RotaryPositionEmbedding(nn.Module):
             raise ValueError("head_dim must be even for rotary position embedding")
 
         # ---------------------------------------------------------
-        # Keep inverse frequencies as deterministic state and cache
-        # generated cos and sin tables outside saved checkpoints.
+        # Precompute fixed trig tables once so training forwards do
+        # not update module buffers or synchronize CUDA tensors.
         # ---------------------------------------------------------
         embedding_index = torch.arange(start=0, end=head_dim, step=2).float()
         inv_freq = 1 / torch.tensor(10000.0) ** (embedding_index / head_dim)
-        self.register_buffer("inv_freq", inv_freq)
-        self.register_buffer("cos_cache", torch.empty(0), persistent=False)
-        self.register_buffer("sin_cache", torch.empty(0), persistent=False)
-
-    def _extend_cache(self, position_count: int, device: torch.device) -> None:
-        # ---------------------------------------------------------
-        # Rebuild cached trig tables only when the requested maximum
-        # position exceeds the current cache or the device changes.
-        # ---------------------------------------------------------
-        cache_is_ready = self.cos_cache.size(dim=0) >= position_count and self.cos_cache.device == device
-
-        if cache_is_ready:
-            return
-
-        # ---------------------------------------------------------
-        # Cache all positions up to the requested limit so later
-        # shorter calls only gather from existing cos and sin tables.
-        # ---------------------------------------------------------
-        positions = torch.arange(
-            start=0,
-            end=position_count,
-            device=device,
-            dtype=self.inv_freq.dtype,
-        )
-        inv_freq = self.inv_freq.to(device=device)
+        positions = torch.arange(start=0, end=max_len, dtype=inv_freq.dtype)
         angles = positions.unsqueeze(-1) * inv_freq
-        self.cos_cache = torch.cos(angles)
-        self.sin_cache = torch.sin(angles)
+        self.register_buffer("cos_cache", torch.cos(angles), persistent=False)
+        self.register_buffer("sin_cache", torch.sin(angles), persistent=False)
 
     def forward(
         self,
@@ -74,11 +50,9 @@ class RotaryPositionEmbedding(nn.Module):
         position_ids = position_ids.to(device=x.device, dtype=torch.long)
 
         # ---------------------------------------------------------
-        # Gather cached cos and sin rows for explicit packed or
-        # contiguous positions without recomputing trig each call.
+        # Gather precomputed cos and sin rows without recomputing
+        # trig functions or extending buffers inside the forward.
         # ---------------------------------------------------------
-        position_count = int(position_ids.max().item()) + 1
-        self._extend_cache(position_count=position_count, device=x.device)
         cos = self.cos_cache[position_ids].to(dtype=x.dtype).unsqueeze(1)
         sin = self.sin_cache[position_ids].to(dtype=x.dtype).unsqueeze(1)
 

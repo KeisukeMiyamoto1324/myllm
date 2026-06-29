@@ -42,10 +42,10 @@ class PretrainingTrainTest(unittest.TestCase):
         self.assertFalse(torch.equal(rotated[:, :, 0, :], rotated[:, :, 1, :]))
         self.assertTrue(torch.equal(rotated[:, :, 0, :], rotated[:, :, 2, :]))
 
-    def test_rotary_position_embedding_reuses_trig_cache(self) -> None:
+    def test_rotary_position_embedding_reuses_precomputed_trig_tables(self) -> None:
         # ---------------------------------------------------------
-        # Build cos and sin tables once for the longest requested
-        # position range and reuse them for shorter later calls.
+        # Build cos and sin tables during initialization and reuse
+        # them without reallocating buffers inside forward calls.
         # ---------------------------------------------------------
         rotary_position_embedding = RotaryPositionEmbedding(head_dim=4)
         long_x = torch.ones((1, 2, 5, 4), dtype=torch.float32)
@@ -60,7 +60,7 @@ class PretrainingTrainTest(unittest.TestCase):
         third_cos_pointer = rotary_position_embedding.cos_cache.data_ptr()
 
         self.assertEqual(first_cos_pointer, second_cos_pointer)
-        self.assertNotEqual(second_cos_pointer, third_cos_pointer)
+        self.assertEqual(second_cos_pointer, third_cos_pointer)
         self.assertNotIn("cos_cache", rotary_position_embedding.state_dict())
         self.assertNotIn("sin_cache", rotary_position_embedding.state_dict())
 

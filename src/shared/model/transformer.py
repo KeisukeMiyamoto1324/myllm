@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import LambdaLR
 import lightning as L
 
 from src.shared.model.kv_cache import KeyValueCache, LayerKeyValueCache
+from src.shared.model.position_encoding import RotaryPositionEmbedding
 from src.shared.model.self_attention import Attention
 
 
@@ -34,7 +35,13 @@ class FeedForward(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        rotary_position_embedding: RotaryPositionEmbedding,
+    ) -> None:
         super().__init__()
 
         # ---------------------------------------------------------
@@ -42,7 +49,11 @@ class DecoderBlock(nn.Module):
         # RMS normalization layers with residual connections.
         # ---------------------------------------------------------
         self.norm_1 = nn.RMSNorm(normalized_shape=d_model)
-        self.attention = Attention(d_model=d_model, num_heads=num_heads)
+        self.attention = Attention(
+            d_model=d_model,
+            num_heads=num_heads,
+            rotary_position_embedding=rotary_position_embedding,
+        )
         self.norm_2 = nn.RMSNorm(normalized_shape=d_model)
         self.feed_forward = FeedForward(d_model=d_model, d_ff=d_ff)
 
@@ -110,6 +121,7 @@ class DecoderOnlyTransformer(L.LightningModule):
         self,
         num_tokens: int = 4,
         d_model: int = 2,
+        max_len: int = 6,
         num_layers: int = 2,
         num_heads: int = 1,
         d_ff: int = 8,
@@ -128,8 +140,20 @@ class DecoderOnlyTransformer(L.LightningModule):
         # blocks that apply rotary positions inside attention.
         # ---------------------------------------------------------
         self.we = nn.Embedding(num_embeddings=num_tokens, embedding_dim=d_model)
+        self.rotary_position_embedding = RotaryPositionEmbedding(
+            head_dim=d_model // num_heads,
+            max_len=max_len,
+        )
         self.blocks = nn.ModuleList(
-            [DecoderBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff) for _ in range(num_layers)]
+            [
+                DecoderBlock(
+                    d_model=d_model,
+                    num_heads=num_heads,
+                    d_ff=d_ff,
+                    rotary_position_embedding=self.rotary_position_embedding,
+                )
+                for _ in range(num_layers)
+            ]
         )
         self.final_norm = nn.RMSNorm(normalized_shape=d_model)
         self.fc_layer = nn.Linear(in_features=d_model, out_features=num_tokens)

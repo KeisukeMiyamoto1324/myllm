@@ -337,6 +337,7 @@ def main() -> None:
     model = DecoderOnlyTransformer(
         num_tokens=tokenizer.get_vocab_size(),
         d_model=args.d_model,
+        max_len=args.max_len,
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         d_ff=args.d_ff,

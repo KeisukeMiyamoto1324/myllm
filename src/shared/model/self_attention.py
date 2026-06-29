@@ -7,7 +7,12 @@ from src.shared.model.position_encoding import RotaryPositionEmbedding
 
 
 class Attention(nn.Module):
-    def __init__(self, d_model: int = 2, num_heads: int = 1) -> None:
+    def __init__(
+        self,
+        d_model: int = 2,
+        num_heads: int = 1,
+        rotary_position_embedding: RotaryPositionEmbedding | None = None,
+    ) -> None:
         super().__init__()
 
         # ---------------------------------------------------------
@@ -20,7 +25,9 @@ class Attention(nn.Module):
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
-        self.rotary_position_embedding = RotaryPositionEmbedding(head_dim=self.head_dim)
+        self.rotary_position_embedding = rotary_position_embedding or RotaryPositionEmbedding(
+            head_dim=self.head_dim,
+        )
 
         # ---------------------------------------------------------
         # Project inputs into query, key, and value spaces and merge

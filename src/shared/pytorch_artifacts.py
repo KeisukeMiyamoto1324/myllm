@@ -48,6 +48,7 @@ def build_model_from_config(
     return DecoderOnlyTransformer(
         num_tokens=vocab_size,
         d_model=int(model_config["d_model"]),
+        max_len=int(model_config["max_len"]),
         num_layers=int(model_config["num_layers"]),
         num_heads=int(model_config["num_heads"]),
         d_ff=int(model_config["d_ff"]),
