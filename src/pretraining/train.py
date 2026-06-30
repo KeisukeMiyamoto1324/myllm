@@ -11,6 +11,8 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
+torch.set_float32_matmul_precision("high")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.pretraining.cli import parse_args
